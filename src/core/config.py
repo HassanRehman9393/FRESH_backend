@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     
     # CORS Configuration - use Field with alias to map environment variable
-    allowed_origins_str: str = Field(default="*", alias="ALLOWED_ORIGINS")
+    allowed_origins_str: str = Field(default="http://localhost:3000,http://localhost:3001,https://your-frontend-domain.com", alias="ALLOWED_ORIGINS")
     
     # File Upload Configuration
     max_file_size: int = 10485760  # 10MB default
@@ -37,9 +37,10 @@ class Settings(BaseSettings):
     @property
     def allowed_origins(self) -> List[str]:
         """Parse allowed origins from string to list."""
-        if self.allowed_origins_str == "*":
-            return ["*"]
-        return [origin.strip() for origin in self.allowed_origins_str.split(",") if origin.strip()]
+        # Never return ["*"] when using credentials
+        origins = [origin.strip() for origin in self.allowed_origins_str.split(",") if origin.strip()]
+        # Filter out "*" if present when using credentials
+        return [origin for origin in origins if origin != "*"]
     
     @property
     def allowed_file_types(self) -> List[str]:
