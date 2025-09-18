@@ -40,7 +40,16 @@ class Settings(BaseSettings):
         # Never return ["*"] when using credentials
         origins = [origin.strip() for origin in self.allowed_origins_str.split(",") if origin.strip()]
         # Filter out "*" if present when using credentials
-        return [origin for origin in origins if origin != "*"]
+        filtered_origins = [origin for origin in origins if origin != "*"]
+        
+        # Add common development origins if not present
+        dev_origins = ["http://localhost:3000", "http://localhost:3001"]
+        for dev_origin in dev_origins:
+            if dev_origin not in filtered_origins:
+                filtered_origins.append(dev_origin)
+        
+        print(f"🔧 CORS Allowed Origins: {filtered_origins}")
+        return filtered_origins
     
     @property
     def allowed_file_types(self) -> List[str]:
