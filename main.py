@@ -86,26 +86,10 @@ async def root():
         "health": "/health"
     }
 
-# API router placeholder for future endpoints
-@app.get("/api", tags=["API"])
-async def api_info():
-    """
-    API information endpoint.
-    """
-    return {
-        "message": "FRESH Backend API",
-        "version": settings.app_version,
-        "endpoints": {
-            "health": "/health",
-            "docs": "/docs",
-            "future_endpoints": [
-                "/api/detection/fruit",
-                "/api/disease/detect", 
-                "/api/images/upload",
-                "/api/auth/login"
-            ]
-        }
-    }
+
+# Import and include API routers
+from src.api import auth_router
+app.include_router(auth_router)
 
 if __name__ == "__main__":
     uvicorn.run(
