@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     max_file_size: int = 10485760  # 10MB default
     allowed_file_types_str: str = Field(default="image/jpeg,image/png,image/webp", alias="ALLOWED_FILE_TYPES")
     
+    # Google OAuth Configuration
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
+    
     # Application Info
     app_name: str = "FRESH Backend API"
     app_version: str = "1.0.0"
