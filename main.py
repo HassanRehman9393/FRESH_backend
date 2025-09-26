@@ -47,12 +47,14 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+print(f"🔧 Configuring CORS for origins: {settings.allowed_origins}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Health check endpoint
@@ -86,26 +88,10 @@ async def root():
         "health": "/health"
     }
 
-# API router placeholder for future endpoints
-@app.get("/api", tags=["API"])
-async def api_info():
-    """
-    API information endpoint.
-    """
-    return {
-        "message": "FRESH Backend API",
-        "version": settings.app_version,
-        "endpoints": {
-            "health": "/health",
-            "docs": "/docs",
-            "future_endpoints": [
-                "/api/detection/fruit",
-                "/api/disease/detect", 
-                "/api/images/upload",
-                "/api/auth/login"
-            ]
-        }
-    }
+
+# Import and include API routers
+from src.api import auth_router
+app.include_router(auth_router)
 
 if __name__ == "__main__":
     uvicorn.run(

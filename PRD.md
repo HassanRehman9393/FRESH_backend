@@ -161,8 +161,7 @@ fresh-backend-api/
 * `email` (unique)
 * `password_hash`
 * `full_name`
-* `role` (farmer, exporter, government, admin)
-* `is_active`
+* `role` (farmer, exporter,government, admin)
 * `created_at`
 * `updated_at`
 

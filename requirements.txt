@@ -20,7 +20,7 @@ httpx
 redis
 
 # Pydantic for data validation
-pydantic
+pydantic[email]
 pydantic-settings
 
 # Testing
