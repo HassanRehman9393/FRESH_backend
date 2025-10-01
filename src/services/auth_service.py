@@ -30,8 +30,8 @@ def signup_user(user: UserSignup) -> UserResponseWithAuth:
     if not user.password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password is required for regular signup.")
     
-    # Hash password
-    password_hash = hash_password(user.password)
+    # Hash password (truncate to 72 chars for bcrypt)
+    password_hash = hash_password(user.password[:72])
     # Create user
     user_data = {
         "id": str(uuid.uuid4()),
