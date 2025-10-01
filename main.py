@@ -47,10 +47,16 @@ app = FastAPI(
 )
 
 # Add CORS middleware
-print(f"🔧 Configuring CORS for origins: {settings.allowed_origins}")
+cors_origins = set(settings.allowed_origins)
+cors_origins.update({
+    "http://localhost:3000",
+    "https://fresh-web-desktop-gsmg.vercel.app/",
+    "https://freshbackend-production-096a.up.railway.app"
+})
+print(f"🔧 Configuring CORS for origins: {list(cors_origins)}")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins,
+    allow_origins=list(cors_origins),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
