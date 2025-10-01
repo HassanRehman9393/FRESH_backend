@@ -12,6 +12,10 @@ supabase
 python-jose[cryptography]
 passlib[bcrypt]
 python-multipart
+google-auth
+google-auth-oauthlib
+authlib
+itsdangerous
 
 # HTTP client for Supabase
 httpx
