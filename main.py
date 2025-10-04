@@ -46,13 +46,13 @@ app = FastAPI(
     debug=settings.debug,
 )
 
-# Add CORS middleware - Allow all origins for flexibility
-print("🔧 Configuring CORS to allow all origins for DigitalOcean deployment")
+# Add CORS middleware - Use settings-based origins for DigitalOcean deployment
+print("🔧 Configuring CORS for DigitalOcean deployment")
 
 # Add comprehensive CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=settings.allowed_origins,  # Use dynamic origins from settings
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
@@ -62,13 +62,22 @@ app.add_middleware(
 
 # Manual OPTIONS handler for preflight requests (additional safety)
 @app.options("/{full_path:path}")
-async def options_handler(full_path: str):
+async def options_handler(full_path: str, request):
     """Handle preflight OPTIONS requests manually for extra CORS compatibility."""
+    # Get the origin from the request header
+    origin = request.headers.get("origin", "https://monkfish-app-vgy3w.ondigitalocean.app")
+    
+    # Check if origin is in allowed origins
+    if origin in settings.allowed_origins or "*" in settings.allowed_origins:
+        allowed_origin = origin
+    else:
+        allowed_origin = "https://monkfish-app-vgy3w.ondigitalocean.app"  # Default to your frontend
+    
     return JSONResponse(
         status_code=200,
         content={"message": "OK"},
         headers={
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": allowed_origin,
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
             "Access-Control-Allow-Headers": "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
             "Access-Control-Allow-Credentials": "true",

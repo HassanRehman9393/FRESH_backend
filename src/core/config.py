@@ -45,19 +45,42 @@ class Settings(BaseSettings):
     @property
     def allowed_origins(self) -> List[str]:
         """Parse allowed origins from string to list."""
-        # Never return ["*"] when using credentials
+        # Handle wildcard case - return comprehensive list instead of ["*"]
+        if self.allowed_origins_str.strip() == "*":
+            # Return comprehensive list of likely origins instead of wildcard
+            comprehensive_origins = [
+                "http://localhost:3000",
+                "http://localhost:3001", 
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:3001",
+                "https://localhost:3000",
+                "https://127.0.0.1:3000",
+                "https://monkfish-app-vgy3w.ondigitalocean.app",  # Your frontend
+                "https://clownfish-app-wyp5e.ondigitalocean.app",  # Your backend
+                # Add common domains that might be used
+                "https://fresh-web-desktop-gsmg.vercel.app",
+                "https://freshbackend-production-096a.up.railway.app"
+            ]
+            print(f"🔧 CORS Wildcard detected - using comprehensive origins: {comprehensive_origins}")
+            return comprehensive_origins
+        
+        # Parse comma-separated origins
         origins = [origin.strip() for origin in self.allowed_origins_str.split(",") if origin.strip()]
-        # Filter out "*" if present when using credentials
-        filtered_origins = [origin for origin in origins if origin != "*"]
         
-        # Add common development origins if not present
-        dev_origins = ["http://localhost:3000", "http://localhost:3001"]
-        for dev_origin in dev_origins:
-            if dev_origin not in filtered_origins:
-                filtered_origins.append(dev_origin)
+        # Add DigitalOcean origins if not present
+        required_origins = [
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "https://monkfish-app-vgy3w.ondigitalocean.app",  # Your frontend
+            "https://clownfish-app-wyp5e.ondigitalocean.app"   # Your backend
+        ]
         
-        print(f"🔧 CORS Allowed Origins: {filtered_origins}")
-        return filtered_origins
+        for required_origin in required_origins:
+            if required_origin not in origins:
+                origins.append(required_origin)
+        
+        print(f"🔧 CORS Allowed Origins: {origins}")
+        return origins
     
     @property
     def allowed_file_types(self) -> List[str]:
