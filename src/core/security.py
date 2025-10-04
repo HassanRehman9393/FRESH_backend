@@ -3,11 +3,33 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from src.core.config import settings
+import bcrypt
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Configure passlib with fallback options
+pwd_context = CryptContext(
+    schemes=["bcrypt"], 
+    deprecated="auto",
+    bcrypt__default_rounds=12,  # Set explicit rounds
+)
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    """Hash password with bcrypt, handling length limitations."""
+    try:
+        # Ensure password is not longer than 72 bytes (bcrypt limitation)
+        if len(password.encode('utf-8')) > 72:
+            password = password[:72]
+        return pwd_context.hash(password)
+    except Exception as e:
+        print(f"Error hashing password: {e}")
+        # Fallback to direct bcrypt if passlib fails
+        try:
+            import bcrypt
+            password_bytes = password.encode('utf-8')[:72]  # Limit to 72 bytes
+            salt = bcrypt.gensalt(rounds=12)
+            return bcrypt.hashpw(password_bytes, salt).decode('utf-8')
+        except Exception as fallback_error:
+            print(f"Fallback bcrypt also failed: {fallback_error}")
+            raise Exception(f"Password hashing failed: {str(e)}")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
