@@ -90,7 +90,7 @@ fresh-backend-api/
 
 #### Core Endpoints
 
-* `POST /api/detection/fruit`
+
 * `POST /api/detection/batch-fruit`
 * `GET  /api/detection/fruit/{detection_id}`
 * `GET  /api/detection/fruit/results`
@@ -139,9 +139,6 @@ fresh-backend-api/
 * `POST /api/images/batch-upload`
 * `GET  /api/images/{image_id}`
 * `DELETE /api/images/{image_id}`
-* `POST /api/images/{image_id}/process`
-* `GET  /api/images/{image_id}/metadata`
-* `POST /api/images/{image_id}/resize`
 
 #### Features
 
@@ -170,27 +167,27 @@ fresh-backend-api/
 * `id` (UUID, primary key)
 * `user_id` (FK → users.id)
 * `file_path`
-* `file_size`
-* `mime_type`
-* `width`
-* `height`
+* `file_name`
 * `metadata` (JSONB)
 * `created_at`
 
-**Fruit Detections**
+**Detection Results**
 
-* `id` (UUID, primary key)
+* `detection_id` (UUID, primary key)
 * `user_id` (FK → users.id)
 * `image_id` (FK → images.id)
 * `fruit_type`
 * `confidence`
 * `bounding_box` (JSONB)
-* `quality_score`
-* `size_metrics` (JSONB)
-* `color_metrics` (JSONB)
-* `ripeness_score`
-* `defects` (JSONB)
 * `created_at`
+
+**Classification Results** 
+* - classification_id (Primary Key)
+* - detection_id (Foreign Key)
+* - ripeness_level (VARCHAR: ripe/unripe/overripe/rotten)
+* - confidence_score (DECIMAL: 0.0-1.0)
+* - estimated_color (VARCHAR)
+* - estimated_size (VARCHAR)
 
 **Disease Detections**
 
