@@ -24,7 +24,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     
     # CORS Configuration - use Field with alias to map environment variable
-    allowed_origins_str: str = Field(default="http://localhost:3000,http://localhost:3001,https://your-frontend-domain.com", alias="ALLOWED_ORIGINS")
+    allowed_origins_str: str = Field(
+        default="http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,https://fresh-web-desktop-gsmg.vercel.app,https://freshbackend-production-096a.up.railway.app", 
+        alias="ALLOWED_ORIGINS"
+    )
     
     # File Upload Configuration
     max_file_size: int = 10485760  # 10MB default

@@ -50,18 +50,45 @@ app = FastAPI(
 cors_origins = set(settings.allowed_origins)
 cors_origins.update({
     "http://localhost:3000",
-    "https://fresh-web-desktop-gsmg.vercel.app/",
-    "https://freshbackend-production-096a.up.railway.app"
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "https://fresh-web-desktop-gsmg.vercel.app",  # Removed trailing slash
+    "https://freshbackend-production-096a.up.railway.app",
+    "https://localhost:3000",  # For HTTPS local development
+    "https://127.0.0.1:3000",  # For HTTPS local development
 })
+
 print(f"🔧 Configuring CORS for origins: {list(cors_origins)}")
+
+# Add comprehensive CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(cors_origins),
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
     expose_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
+
+# Manual OPTIONS handler for preflight requests (additional safety)
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    """Handle preflight OPTIONS requests manually for extra CORS compatibility."""
+    origin = "http://localhost:3000"  # Default fallback
+    
+    return JSONResponse(
+        status_code=200,
+        content={"message": "OK"},
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
+            "Access-Control-Allow-Headers": "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Max-Age": "3600",
+        }
+    )
 
 # Health check endpoint
 @app.get("/health", tags=["Health"])
