@@ -32,7 +32,23 @@ def hash_password(password: str) -> str:
             raise Exception(f"Password hashing failed: {str(e)}")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify password with bcrypt, handling length limitations."""
+    try:
+        # Ensure password is not longer than 72 bytes (bcrypt limitation)
+        if len(plain_password.encode('utf-8')) > 72:
+            plain_password = plain_password[:72]
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception as e:
+        print(f"Error verifying password: {e}")
+        # Fallback to direct bcrypt if passlib fails
+        try:
+            import bcrypt
+            password_bytes = plain_password.encode('utf-8')[:72]  # Limit to 72 bytes
+            hashed_bytes = hashed_password.encode('utf-8') if isinstance(hashed_password, str) else hashed_password
+            return bcrypt.checkpw(password_bytes, hashed_bytes)
+        except Exception as fallback_error:
+            print(f"Fallback bcrypt verification also failed: {fallback_error}")
+            return False  # Return False instead of raising exception for verification
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT access token."""
