@@ -11,48 +11,68 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
     For now, returns dummy data for testing.
     TODO: Integrate with actual ML model
     """
-    # First verify the image exists and user has access
-    await get_image_service(str(image_id))
-    
-    # Dummy detection result for testing
-    detection_id = uuid4()
-    
-    # In real implementation, this would be the result from ML model
-    dummy_result = {
-        "detection_id": detection_id,
-        "user_id": user_id,
-        "image_id": image_id,
-        "fruit_type": "orange",  # Dummy value
-        "confidence": 0.95,      # Dummy confidence score
-        "bounding_box": {        # Dummy bounding box
-            "x": 100,
-            "y": 100,
-            "width": 200,
-            "height": 200
-        },
-        "created_at": datetime.utcnow()
-    }
-    
-    # Save to database
-    result = admin_supabase.table("detection_results").insert(dummy_result).execute()
-    
-    if not result.data:
-        raise Exception("Failed to save detection result")
+    try:
+        # First verify the image exists and user has access
+        await get_image_service(str(image_id))
         
-    return DetectionResponse(**result.data[0])
+        # Dummy detection result for testing
+        detection_id = str(uuid4())
+        current_time = datetime.utcnow()
+        
+        # In real implementation, this would be the result from ML model
+        dummy_result = {
+            "detection_id": detection_id,
+            "user_id": str(user_id),
+            "image_id": str(image_id),
+            "fruit_type": "orange",  # Dummy value
+            "confidence": 0.95,      # Dummy confidence score
+            "bounding_box": {        # Dummy bounding box
+                "x": 100.0,
+                "y": 100.0,
+                "width": 200.0,
+                "height": 200.0
+            },
+            "created_at": current_time.isoformat()
+        }
+        
+        print(f"Attempting to save detection result: {dummy_result}")
+        
+        # Save to database
+        result = admin_supabase.table("detection_results").insert(dummy_result).execute()
+        
+        print(f"Database insert result: {result}")
+        
+        if not result.data:
+            raise Exception("Failed to save detection result - no data returned")
+            
+        # Create response object
+        response_data = result.data[0]
+        print(f"Response data from DB: {response_data}")
+        
+        return DetectionResponse(**response_data)
+        
+    except Exception as e:
+        print(f"Error in process_single_image: {str(e)}")
+        raise Exception(f"Failed to process image {image_id}: {str(e)}")
 
 async def process_batch_images(image_ids: List[UUID], user_id: UUID) -> BatchDetectionResponse:
     """Process multiple images for object detection"""
     results = []
     failed_count = 0
     
+    print(f"Processing batch of {len(image_ids)} images for user {user_id}")
+    
     for image_id in image_ids:
         try:
+            print(f"Processing image: {image_id}")
             result = await process_single_image(image_id, user_id)
             results.append(result)
+            print(f"Successfully processed image: {image_id}")
         except Exception as e:
             print(f"Failed to process image {image_id}: {str(e)}")
             failed_count += 1
+    
+    print(f"Batch processing complete. Success: {len(results)}, Failed: {failed_count}")
             
     return BatchDetectionResponse(
         results=results,

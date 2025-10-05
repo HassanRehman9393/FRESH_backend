@@ -29,19 +29,6 @@ async def batch_detect_fruits(request: BatchDetectionRequest):
             detail=str(e)
         )
 
-@router.get("/fruit/{detection_id}", response_model=DetectionResponse)
-async def get_detection_result(detection_id: UUID):
-    """
-    Retrieve a specific detection result by its ID.
-    """
-    try:
-        return await get_detection_by_id(detection_id)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
-
 @router.get("/fruit/results", response_model=List[DetectionResponse])
 async def get_detection_results(
     user_id: UUID,
@@ -57,5 +44,18 @@ async def get_detection_results(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@router.get("/fruit/{detection_id}", response_model=DetectionResponse)
+async def get_detection_result(detection_id: UUID):
+    """
+    Retrieve a specific detection result by its ID.
+    """
+    try:
+        return await get_detection_by_id(detection_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
