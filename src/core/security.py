@@ -66,6 +66,9 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
     """Verify and decode JWT token."""
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        # Map 'sub' to 'user_id' for consistency
+        if 'sub' in payload:
+            payload['user_id'] = payload['sub']
         return payload
     except JWTError:
         return None

@@ -28,7 +28,7 @@ class DetectionResponse(BaseModel):
 class BatchDetectionRequest(BaseModel):
     """Schema for batch detection request"""
     image_ids: List[UUID]
-    user_id: UUID
+    # user_id will come from authentication, no need to include in request
 
 class BatchDetectionResponse(BaseModel):
     """Schema for batch detection response"""
