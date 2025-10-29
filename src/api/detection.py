@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status, Query, Depends
+from fastapi import APIRouter, HTTPException, status, Query, Depends, UploadFile, File
 from typing import List, Optional
 from uuid import UUID
 from src.schemas.detection import (

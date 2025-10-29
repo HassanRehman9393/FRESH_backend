@@ -1,60 +1,102 @@
 from uuid import UUID, uuid4
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+import base64
+import logging
 from src.core.supabase_client import admin_supabase
 from src.schemas.disease import DiseaseDetectionResponse, BatchDiseaseDetectionResponse
 from src.services.detection_service import get_detection_by_id
+from src.services.image_service import get_image_service
+from src.services.ml_client import ml_client
+
+logger = logging.getLogger(__name__)
 
 async def process_single_disease_detection(detection_id: UUID, user_id: UUID) -> DiseaseDetectionResponse:
     """
-    Process a single detection for disease analysis.
-    For now, returns dummy data for testing.
-    TODO: Integrate with actual ML disease detection model
+    Process a single detection for disease analysis using ML API.
+    Fetches image from storage, sends to ML API, and saves disease results to database.
     """
     try:
         # First verify the detection exists
         detection = await get_detection_by_id(detection_id)
         
-        # Dummy disease detection result for testing
-        disease_detection_id = str(uuid4())
-        current_time = datetime.utcnow()
+        # Get image metadata from database
+        image = await get_image_service(str(detection.image_id))
         
-        # In real implementation, this would be the result from ML disease model
-        dummy_result = {
-            "disease_detection_id": disease_detection_id,
+        # Convert Pydantic model to dict if needed
+        if hasattr(image, 'model_dump'):
+            image_dict = image.model_dump()
+        elif hasattr(image, 'dict'):
+            image_dict = image.dict()
+        else:
+            image_dict = image
+        
+        logger.info(f"Processing disease detection for image {detection.image_id}")
+        
+        # Download image from Supabase storage using stored filename
+        bucket_name = "images"
+        file_name = image_dict['file_name']  # This is the storage filename like "uuid.jpg"
+        
+        # Download file from storage
+        file_response = admin_supabase.storage.from_(bucket_name).download(file_name)
+        
+        if not file_response:
+            raise Exception(f"Failed to download image from storage: {file_name}")
+        
+        logger.info(f"Downloaded image from storage for disease detection")
+        
+        # Convert image bytes to base64
+        image_base64 = base64.b64encode(file_response).decode('utf-8')
+        
+        # Send to ML API for disease detection
+        ml_result = await ml_client.detect_disease_base64(
+            image_base64=image_base64,
+            user_id=str(user_id),
+            image_name=image_dict['file_name'],
+            fruit_type=detection.fruit_type  # Use detected fruit type as hint
+        )
+        
+        logger.info(f"ML disease detection response received: {ml_result.get('success')}")
+        
+        # Extract disease detection results from ML response
+        if not ml_result.get('success'):
+            raise Exception(f"ML API returned unsuccessful response: {ml_result.get('message')}")
+        
+        if not ml_result.get('disease_results') or len(ml_result['disease_results']) == 0:
+            raise Exception("No disease detection results from ML API")
+        
+        # Get the first disease detection result
+        first_disease = ml_result['disease_results'][0]
+        
+        # Prepare database record
+        disease_record = {
+            "disease_detection_id": str(uuid4()),
             "detection_id": str(detection_id),
             "user_id": str(user_id),
             "image_id": str(detection.image_id),
-            "disease_type": "healthy",  # Dummy value: healthy, anthracnose, citrus_canker, unknown
-            "is_diseased": False,       # Dummy value
-            "disease_confidence": 0.92, # Dummy confidence score
-            "severity_level": None,     # None for healthy fruits
-            "probabilities": {          # Dummy probabilities
-                "healthy": 0.92,
-                "anthracnose": 0.05,
-                "citrus_canker": 0.03
-            },
-            "created_at": current_time.isoformat()
+            "disease_type": first_disease.get('disease_type'),
+            "is_diseased": first_disease.get('is_diseased'),
+            "disease_confidence": first_disease.get('confidence'),
+            "severity_level": first_disease.get('severity'),
+            "probabilities": first_disease.get('probabilities'),
+            "created_at": datetime.utcnow().isoformat()
         }
         
-        print(f"Attempting to save disease detection result: {dummy_result}")
+        logger.info(f"Saving disease detection result to database")
         
         # Save to database
-        result = admin_supabase.table("disease_detections").insert(dummy_result).execute()
-        
-        print(f"Database insert result: {result}")
+        result = admin_supabase.table("disease_detections").insert(disease_record).execute()
         
         if not result.data:
-            raise Exception("Failed to save disease detection result - no data returned")
-            
+            raise Exception("Failed to save disease detection result")
+        
         # Create response object
         response_data = result.data[0]
-        print(f"Response data from DB: {response_data}")
         
         return DiseaseDetectionResponse(**response_data)
         
     except Exception as e:
-        print(f"Error in process_single_disease_detection: {str(e)}")
+        logger.error(f"Error in process_single_disease_detection: {str(e)}")
         raise Exception(f"Failed to process disease detection {detection_id}: {str(e)}")
 
 async def process_batch_disease_detection(detection_ids: List[UUID], user_id: UUID) -> BatchDiseaseDetectionResponse:
@@ -64,11 +106,11 @@ async def process_batch_disease_detection(detection_ids: List[UUID], user_id: UU
     diseased_count = 0
     healthy_count = 0
     
-    print(f"Processing batch of {len(detection_ids)} disease detections for user {user_id}")
+    logger.info(f"Processing batch of {len(detection_ids)} disease detections for user {user_id}")
     
     for detection_id in detection_ids:
         try:
-            print(f"Processing disease detection for: {detection_id}")
+            logger.info(f"Processing disease detection for: {detection_id}")
             result = await process_single_disease_detection(detection_id, user_id)
             results.append(result)
             
@@ -78,12 +120,12 @@ async def process_batch_disease_detection(detection_ids: List[UUID], user_id: UU
             else:
                 healthy_count += 1
                 
-            print(f"Successfully processed disease detection: {detection_id}")
+            logger.info(f"Successfully processed disease detection: {detection_id}")
         except Exception as e:
-            print(f"Failed to process disease detection {detection_id}: {str(e)}")
+            logger.error(f"Failed to process disease detection {detection_id}: {str(e)}")
             failed_count += 1
     
-    print(f"Batch disease detection complete. Success: {len(results)}, Failed: {failed_count}, Diseased: {diseased_count}, Healthy: {healthy_count}")
+    logger.info(f"Batch disease detection complete. Success: {len(results)}, Failed: {failed_count}, Diseased: {diseased_count}, Healthy: {healthy_count}")
             
     return BatchDiseaseDetectionResponse(
         results=results,
@@ -93,6 +135,7 @@ async def process_batch_disease_detection(detection_ids: List[UUID], user_id: UU
         diseased_count=diseased_count,
         healthy_count=healthy_count
     )
+
 
 async def get_disease_detection_by_id(disease_detection_id: UUID) -> DiseaseDetectionResponse:
     """Retrieve a specific disease detection result"""

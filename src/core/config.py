@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
     
+    # ML API Configuration
+    ml_api_url: str = Field(default="http://localhost:8000", alias="ML_API_URL")
+    ml_api_timeout: int = Field(default=300, alias="ML_API_TIMEOUT")  # 5 minutes for ML processing
+    
     # Application Info
     app_name: str = "FRESH Backend API"
     app_version: str = "1.0.0"
