@@ -171,10 +171,11 @@ async def root():
 
 
 # Import and include API routers
-from src.api import auth_router, images_router, detection_router
+from src.api import auth_router, images_router, detection_router, disease_router
 app.include_router(auth_router, prefix="/api")
 app.include_router(images_router, prefix="/api")
 app.include_router(detection_router, prefix="/api")
+app.include_router(disease_router, prefix="/api")
 
 if __name__ == "__main__":
     uvicorn.run(
