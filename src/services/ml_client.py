@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional, List
 from uuid import UUID
 from src.core.config import settings
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +13,15 @@ class MLClient:
     
     def __init__(self):
         self.base_url = settings.ml_api_url
-        self.timeout = settings.ml_api_timeout
+        # Use proper httpx.Timeout object with extended read timeout for ML operations
+        self.timeout = httpx.Timeout(
+            timeout=settings.ml_api_timeout,  # Overall timeout
+            connect=10.0,  # Connection timeout
+            read=settings.ml_api_timeout,  # Read timeout (most important for long ML processing)
+            write=10.0,  # Write timeout
+            pool=5.0  # Pool timeout
+        )
+        self.max_retries = getattr(settings, 'ml_api_max_retries', 3)
         
     async def health_check(self) -> Dict[str, Any]:
         """Check ML API health status"""
@@ -24,6 +33,27 @@ class MLClient:
         except Exception as e:
             logger.error(f"ML API health check failed: {str(e)}")
             raise Exception(f"ML API is not available: {str(e)}")
+    
+    async def _retry_request(self, request_func, *args, **kwargs):
+        """Helper method to retry requests with exponential backoff"""
+        last_exception = None
+        
+        for attempt in range(self.max_retries):
+            try:
+                return await request_func(*args, **kwargs)
+            except (httpx.TimeoutException, httpx.ReadTimeout) as e:
+                last_exception = e
+                if attempt < self.max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    logger.warning(f"Request timeout, retrying in {wait_time}s (attempt {attempt + 1}/{self.max_retries})")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Request failed after {self.max_retries} attempts due to timeout")
+            except Exception as e:
+                # For other exceptions, don't retry
+                raise e
+        
+        raise Exception(f"Request timed out after {self.max_retries} retries: {str(last_exception)}")
     
     async def detect_fruits_base64(
         self,
@@ -46,31 +76,37 @@ class MLClient:
         Returns:
             Detection results from ML API
         """
-        try:
-            payload = {
-                "user_id": user_id,
-                "image_base64": image_base64,
-                "image_name": image_name,
-                "return_visualization": return_visualization
-            }
-            
-            if confidence_threshold is not None:
-                payload["confidence_threshold"] = confidence_threshold
-            
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/detection/fruits/base64",
-                    json=payload
-                )
-                response.raise_for_status()
-                return response.json()
+        async def _make_request():
+            try:
+                payload = {
+                    "user_id": user_id,
+                    "image_base64": image_base64,
+                    "image_name": image_name,
+                    "return_visualization": return_visualization
+                }
                 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"ML API returned error: {e.response.status_code} - {e.response.text}")
-            raise Exception(f"ML detection failed: {e.response.text}")
-        except Exception as e:
-            logger.error(f"ML API request failed: {str(e)}")
-            raise Exception(f"Failed to communicate with ML API: {str(e)}")
+                if confidence_threshold is not None:
+                    payload["confidence_threshold"] = confidence_threshold
+                
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    response = await client.post(
+                        f"{self.base_url}/api/detection/fruits/base64",
+                        json=payload
+                    )
+                    response.raise_for_status()
+                    return response.json()
+                    
+            except httpx.HTTPStatusError as e:
+                logger.error(f"ML API returned error: {e.response.status_code} - {e.response.text}")
+                raise Exception(f"ML detection failed: {e.response.text}")
+            except httpx.TimeoutException as e:
+                logger.error(f"ML API request timed out: {str(e)}")
+                raise  # Re-raise to allow retry
+            except Exception as e:
+                logger.error(f"ML API request failed: {str(e)}")
+                raise Exception(f"Failed to communicate with ML API: {str(e)}")
+        
+        return await self._retry_request(_make_request)
     
     async def detect_fruits_batch(
         self,

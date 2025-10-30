@@ -133,10 +133,16 @@ pip list
    DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.zyirkbzespzqrhgudofq.supabase.co:5432/postgres
    SUPABASE_URL=https://zyirkbzespzqrhgudofq.supabase.co
    SUPABASE_ANON_KEY=your_supabase_anon_key_here
+   SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
    
    # Application Configuration
    DEBUG=True
    SECRET_KEY=your_secret_key_here_change_this_in_production
+   
+   # ML API Configuration
+   ML_API_URL=http://localhost:5000
+   ML_API_TIMEOUT=300
+   ML_API_MAX_RETRIES=3
    
    # CORS Configuration
    ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
@@ -283,6 +289,38 @@ pytest --cov=src
 2. **Database Connection**: Verify DATABASE_URL in .env file
 3. **Port Already in Use**: Change port in main.py or kill existing process
 4. **Environment Variables**: Ensure .env file exists and is properly formatted
+
+### Known Issues & Fixes
+
+#### bcrypt Version Error
+**Error**: `AttributeError: module 'bcrypt' has no attribute '__about__'`
+
+**Solution**: The app now uses bcrypt directly instead of passlib to avoid version compatibility issues. If you see this error in production:
+```bash
+pip uninstall passlib
+pip install bcrypt>=4.0.1,<5.0.0
+```
+
+#### Password Length Error
+**Error**: `password cannot be longer than 72 bytes`
+
+**Solution**: This is handled automatically. bcrypt has a 72-byte limit. The app now truncates passwords exceeding this limit with a warning.
+
+#### ML API Timeout
+**Error**: `The read operation timed out` or `ML API request failed`
+
+**Solutions**:
+- Increase timeout in `.env`: `ML_API_TIMEOUT=600` (10 minutes)
+- Check ML API is running and accessible
+- Verify ML_API_URL in `.env` is correct
+- The app now retries failed requests 3 times with exponential backoff
+
+**Environment variables for ML API**:
+```env
+ML_API_URL=http://your-ml-api-url:5000
+ML_API_TIMEOUT=300
+ML_API_MAX_RETRIES=3
+```
 
 ### Debug Mode
 

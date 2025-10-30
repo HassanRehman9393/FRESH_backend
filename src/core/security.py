@@ -1,54 +1,59 @@
-from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from src.core.config import settings
 import bcrypt
+import logging
 
-# Configure passlib with fallback options
-pwd_context = CryptContext(
-    schemes=["bcrypt"], 
-    deprecated="auto",
-    bcrypt__default_rounds=12,  # Set explicit rounds
-)
+logger = logging.getLogger(__name__)
+
+# Bcrypt configuration
+BCRYPT_ROUNDS = 12
+MAX_PASSWORD_LENGTH = 72  # bcrypt limitation in bytes
 
 def hash_password(password: str) -> str:
-    """Hash password with bcrypt, handling length limitations."""
+    """
+    Hash password using bcrypt directly (bypassing passlib to avoid version detection issues).
+    Bcrypt has a 72-byte limit, so we truncate if necessary.
+    """
     try:
-        # Ensure password is not longer than 72 bytes (bcrypt limitation)
-        if len(password.encode('utf-8')) > 72:
-            password = password[:72]
-        return pwd_context.hash(password)
+        # Encode password and truncate to 72 bytes if necessary
+        password_bytes = password.encode('utf-8')
+        if len(password_bytes) > MAX_PASSWORD_LENGTH:
+            logger.warning(f"Password exceeds {MAX_PASSWORD_LENGTH} bytes, truncating")
+            password_bytes = password_bytes[:MAX_PASSWORD_LENGTH]
+        
+        # Generate salt and hash
+        salt = bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+        hashed = bcrypt.hashpw(password_bytes, salt)
+        return hashed.decode('utf-8')
     except Exception as e:
-        print(f"Error hashing password: {e}")
-        # Fallback to direct bcrypt if passlib fails
-        try:
-            import bcrypt
-            password_bytes = password.encode('utf-8')[:72]  # Limit to 72 bytes
-            salt = bcrypt.gensalt(rounds=12)
-            return bcrypt.hashpw(password_bytes, salt).decode('utf-8')
-        except Exception as fallback_error:
-            print(f"Fallback bcrypt also failed: {fallback_error}")
-            raise Exception(f"Password hashing failed: {str(e)}")
+        logger.error(f"Error hashing password: {e}")
+        raise Exception(f"Password hashing failed: {str(e)}")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify password with bcrypt, handling length limitations."""
+    """
+    Verify password using bcrypt directly (bypassing passlib to avoid version detection issues).
+    Bcrypt has a 72-byte limit, so we truncate if necessary.
+    """
     try:
-        # Ensure password is not longer than 72 bytes (bcrypt limitation)
-        if len(plain_password.encode('utf-8')) > 72:
-            plain_password = plain_password[:72]
-        return pwd_context.verify(plain_password, hashed_password)
+        # Encode password and truncate to 72 bytes if necessary
+        password_bytes = plain_password.encode('utf-8')
+        if len(password_bytes) > MAX_PASSWORD_LENGTH:
+            logger.warning(f"Password exceeds {MAX_PASSWORD_LENGTH} bytes, truncating")
+            password_bytes = password_bytes[:MAX_PASSWORD_LENGTH]
+        
+        # Encode hashed password if it's a string
+        if isinstance(hashed_password, str):
+            hashed_bytes = hashed_password.encode('utf-8')
+        else:
+            hashed_bytes = hashed_password
+        
+        # Verify password
+        return bcrypt.checkpw(password_bytes, hashed_bytes)
     except Exception as e:
-        print(f"Error verifying password: {e}")
-        # Fallback to direct bcrypt if passlib fails
-        try:
-            import bcrypt
-            password_bytes = plain_password.encode('utf-8')[:72]  # Limit to 72 bytes
-            hashed_bytes = hashed_password.encode('utf-8') if isinstance(hashed_password, str) else hashed_password
-            return bcrypt.checkpw(password_bytes, hashed_bytes)
-        except Exception as fallback_error:
-            print(f"Fallback bcrypt verification also failed: {fallback_error}")
-            return False  # Return False instead of raising exception for verification
+        logger.error(f"Error verifying password: {e}")
+        return False
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT access token."""

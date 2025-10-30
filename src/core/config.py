@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # ML API Configuration
     ml_api_url: str = Field(default="http://localhost:8000", alias="ML_API_URL")
     ml_api_timeout: int = Field(default=300, alias="ML_API_TIMEOUT")  # 5 minutes for ML processing
+    ml_api_max_retries: int = Field(default=3, alias="ML_API_MAX_RETRIES")
     
     # Application Info
     app_name: str = "FRESH Backend API"

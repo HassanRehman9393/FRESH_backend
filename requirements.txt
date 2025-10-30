@@ -10,7 +10,7 @@ supabase
 
 # Authentication and security
 python-jose[cryptography]
-passlib[bcrypt]
+bcrypt>=4.0.1,<5.0.0
 python-multipart
 google-auth
 google-auth-oauthlib
