@@ -70,3 +70,21 @@ async def get_detection_result(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
+
+@router.get("/results/user/{user_id}", response_model=List[DetectionResponse])
+async def get_detection_results_by_user(
+    user_id: str,
+    limit: int = Query(default=10, le=100),
+    offset: int = Query(default=0, ge=0)
+):
+    """
+    Retrieve all object detection results for a specific user by user ID.
+    Supports pagination with limit and offset parameters.
+    """
+    try:
+        return await get_all_detections(UUID(user_id), limit, offset)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )

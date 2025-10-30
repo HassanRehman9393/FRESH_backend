@@ -51,3 +51,9 @@ async def delete_image(
     success = await delete_image_service(image_id)
     if not success:
         raise HTTPException(status_code=404, detail="Image not found")
+
+@router.get("/user/{user_id}", response_model=List[ImageGetResponse])
+async def get_images_by_user(user_id: str):
+    """Get all images for a user by user_id."""
+    from src.services.image_service import get_images_by_user_service
+    return await get_images_by_user_service(user_id)

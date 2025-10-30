@@ -148,3 +148,10 @@ async def delete_image_service(image_id: str) -> bool:
         raise Exception(f"Failed to delete image: {str(e)}")
     finally:
         print("Delete operation completed")
+
+# Get all images for a user by user_id
+async def get_images_by_user_service(user_id: str) -> list:
+    result = admin_supabase.table("images").select("*").eq("user_id", user_id).execute()
+    if not result.data:
+        return []
+    return [ImageGetResponse(**item) for item in result.data]

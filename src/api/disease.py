@@ -56,6 +56,25 @@ async def get_disease_detection_results(
             detail=str(e)
         )
 
+@router.get("/results/user/{user_id}", response_model=List[DiseaseDetectionResponse])
+async def get_disease_results_by_user(
+    user_id: str,
+    limit: int = Query(default=10, le=100),
+    offset: int = Query(default=0, ge=0)
+):
+    """
+    Retrieve all disease detection results for a specific user by user ID.
+    Supports pagination with limit and offset parameters.
+    """
+    from src.services.disease_service import get_all_disease_detections
+    try:
+        return await get_all_disease_detections(user_id, limit, offset)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
 @router.get("/diseased", response_model=List[DiseaseDetectionResponse])
 async def get_diseased_results(
     limit: int = Query(default=10, le=100),
