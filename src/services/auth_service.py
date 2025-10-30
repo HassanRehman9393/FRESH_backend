@@ -100,20 +100,6 @@ def login_user(user: UserLogin) -> UserResponseWithAuth:
         token_type="bearer"
     )
 
-def login_user(user: UserLogin) -> UserResponse:
-    result = supabase.table("users").select("id", "email", "full_name", "role", "password_hash").eq("email", user.email).execute()
-    if not result.data:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
-    user_data = result.data[0]
-    if not verify_password(user.password, user_data["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
-    return UserResponse(
-        id=user_data["id"],
-        email=user_data["email"],
-        full_name=user_data.get("full_name"),
-        role=UserRole(user_data["role"])
-    )
-
 def get_google_auth_url() -> str:
     """Generate Google OAuth authorization URL."""
     google_auth_url = (

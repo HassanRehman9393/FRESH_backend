@@ -36,3 +36,6 @@ Pillow
 
 # Async support
 asyncpg
+
+# File handling
+aiofiles

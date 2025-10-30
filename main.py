@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 from src.core.config import settings
@@ -46,13 +47,13 @@ app = FastAPI(
     debug=settings.debug,
 )
 
-# Add CORS middleware - Allow all origins for flexibility
-print("🔧 Configuring CORS to allow all origins for DigitalOcean deployment")
+# Add CORS middleware - Use settings-based origins for DigitalOcean deployment
+print("🔧 Configuring CORS for DigitalOcean deployment")
 
 # Add comprehensive CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=settings.allowed_origins,  # Use dynamic origins from settings
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
@@ -60,15 +61,76 @@ app.add_middleware(
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
+# Custom exception handler to ensure CORS headers are always sent
+@app.exception_handler(500)
+async def internal_server_error_handler(request: Request, exc: Exception):
+    """Handle 500 errors and ensure CORS headers are sent."""
+    origin = request.headers.get("origin", "")
+    
+    # Check if origin is allowed
+    if origin in settings.allowed_origins:
+        allowed_origin = origin
+    else:
+        allowed_origin = "https://monkfish-app-vgy3w.ondigitalocean.app"  # Fallback to frontend
+    
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+        headers={
+            "Access-Control-Allow-Origin": allowed_origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+# Custom exception handler for all HTTP exceptions
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions and ensure CORS headers are sent."""
+    origin = request.headers.get("origin", "")
+    
+    # Check if origin is allowed
+    if origin in settings.allowed_origins:
+        allowed_origin = origin
+    else:
+        allowed_origin = "https://monkfish-app-vgy3w.ondigitalocean.app"  # Fallback to frontend
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={
+            "Access-Control-Allow-Origin": allowed_origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
 # Manual OPTIONS handler for preflight requests (additional safety)
 @app.options("/{full_path:path}")
-async def options_handler(full_path: str):
+async def options_handler(full_path: str, request: Request):
     """Handle preflight OPTIONS requests manually for extra CORS compatibility."""
+    # Get the origin from the request header
+    origin = request.headers.get("origin", "https://monkfish-app-vgy3w.ondigitalocean.app")
+    
+    # Debug logging
+    print(f"🔧 OPTIONS Request - Origin: {origin}, Path: {full_path}")
+    print(f"🔧 Request Headers: {dict(request.headers)}")
+    
+    # Check if origin is in allowed origins
+    if origin in settings.allowed_origins or "*" in settings.allowed_origins:
+        allowed_origin = origin
+    else:
+        allowed_origin = "https://monkfish-app-vgy3w.ondigitalocean.app"  # Default to your frontend
+    
+    print(f"🔧 Responding with Origin: {allowed_origin}")
+    
     return JSONResponse(
         status_code=200,
         content={"message": "OK"},
         headers={
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": allowed_origin,
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
             "Access-Control-Allow-Headers": "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
             "Access-Control-Allow-Credentials": "true",
@@ -109,8 +171,11 @@ async def root():
 
 
 # Import and include API routers
-from src.api import auth_router
+from src.api import auth_router, images_router, detection_router, disease_router
 app.include_router(auth_router, prefix="/api")
+app.include_router(images_router, prefix="/api")
+app.include_router(detection_router, prefix="/api")
+app.include_router(disease_router, prefix="/api")
 
 if __name__ == "__main__":
     uvicorn.run(
