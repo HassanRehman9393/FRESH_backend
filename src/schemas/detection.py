@@ -15,14 +15,24 @@ class BoundingBox(BaseModel):
     width: float
     height: float
 
+class ClassificationResult(BaseModel):
+    """Schema for classification results"""
+    ripeness_level: Optional[str] = None  # ripe, unripe, overripe, rotten
+    ripeness_confidence: Optional[float] = None
+    color: Optional[str] = None
+    size: Optional[str] = None  # small, medium, large
+    quality_score: Optional[float] = None  # 0-100
+    defects: Optional[List[str]] = None
+
 class DetectionResponse(BaseModel):
-    """Schema for detection response"""
+    """Schema for detection response with optional classification"""
     detection_id: UUID
     user_id: UUID
     image_id: UUID
     fruit_type: str
     confidence: float
     bounding_box: BoundingBox
+    classification: Optional[ClassificationResult] = None  # Add classification data
     created_at: datetime
 
 class BatchDetectionRequest(BaseModel):

@@ -71,9 +71,30 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
         detection_results = []
         
         for fruit_detection in first_result['detection_results']:
-            # Prepare database record for each detected fruit
+            # Extract classification data from ML API response (it's included in detection results)
+            classification_data = None
+            if fruit_detection.get('ripeness_level'):
+                classification_data = {
+                    'ripeness_level': fruit_detection.get('ripeness_level'),
+                    'ripeness_confidence': fruit_detection.get('classification_confidence'),
+                    'color': fruit_detection.get('estimated_color'),
+                    'size': fruit_detection.get('estimated_size'),
+                    'quality_score': None,  # Can be calculated if needed
+                    'defects': []  # Can be populated if disease detected
+                }
+                
+                # Add disease info to defects if present
+                if fruit_detection.get('is_diseased'):
+                    classification_data['defects'].append(fruit_detection.get('disease_type', 'unknown_disease'))
+                    
+                logger.info(f"Classification data extracted: {classification_data}")
+            
+            # Generate detection_id upfront to use across all tables
+            detection_id = str(uuid4())
+            
+            # 1. Save to detection_results table (fruit detection data)
             detection_record = {
-                "detection_id": str(uuid4()),
+                "detection_id": detection_id,
                 "user_id": str(user_id),
                 "image_id": str(image_id),
                 "fruit_type": fruit_detection.get('fruit_type'),
@@ -84,32 +105,80 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
             
             logger.info(f"Saving detection result for {fruit_detection.get('fruit_type')} with confidence {fruit_detection.get('detection_confidence')}")
             
-            # Save to database
-            result = admin_supabase.table("detection_results").insert(detection_record).execute()
+            detection_result = admin_supabase.table("detection_results").insert(detection_record).execute()
             
-            if not result.data:
+            if not detection_result.data:
                 logger.error(f"Failed to save detection result for fruit")
                 continue
             
-            # Convert to response model
-            saved_data = result.data[0]
-            bbox_data = saved_data['bounding_box']
+            saved_detection = detection_result.data[0]
+            bbox_data = saved_detection['bounding_box']
             
-            from src.schemas.detection import BoundingBox
+            # 2. Save to classification_results table (ripeness/color/size data)
+            if classification_data:
+                classification_record = {
+                    "detection_id": detection_id,
+                    "ripeness_level": classification_data.get('ripeness_level'),
+                    "confidence_score": classification_data.get('ripeness_confidence'),
+                    "estimated_color": classification_data.get('color'),
+                    "estimated_size": classification_data.get('size'),
+                    "created_at": datetime.utcnow().isoformat()
+                }
+                
+                logger.info(f"Saving classification result for detection {detection_id}")
+                classification_result = admin_supabase.table("classification_results").insert(classification_record).execute()
+                
+                if not classification_result.data:
+                    logger.warning(f"Failed to save classification result")
+            
+            # 3. Save to disease_detections table (disease data)
+            if fruit_detection.get('is_diseased') is not None:
+                disease_record = {
+                    "detection_id": detection_id,
+                    "user_id": str(user_id),
+                    "image_id": str(image_id),
+                    "disease_type": fruit_detection.get('disease_type', 'unknown'),
+                    "is_diseased": fruit_detection.get('is_diseased', False),
+                    "disease_confidence": fruit_detection.get('disease_confidence', 0.0),
+                    "severity_level": None,  # Can be added if ML API provides it
+                    "probabilities": None,  # Can be added if ML API provides it
+                    "created_at": datetime.utcnow().isoformat()
+                }
+                
+                logger.info(f"Saving disease detection result for detection {detection_id}")
+                disease_result = admin_supabase.table("disease_detections").insert(disease_record).execute()
+                
+                if not disease_result.data:
+                    logger.warning(f"Failed to save disease detection result")
+            
+            from src.schemas.detection import BoundingBox, ClassificationResult
+            
+            # Build classification response if available
+            classification_response = None
+            if classification_data:
+                classification_response = ClassificationResult(
+                    ripeness_level=classification_data.get('ripeness_level'),
+                    ripeness_confidence=classification_data.get('ripeness_confidence'),
+                    color=classification_data.get('color'),
+                    size=classification_data.get('size'),
+                    quality_score=classification_data.get('quality_score'),
+                    defects=classification_data.get('defects', [])
+                )
             
             detection_response = DetectionResponse(
-                detection_id=UUID(saved_data['detection_id']),
-                user_id=UUID(saved_data['user_id']),
-                image_id=UUID(saved_data['image_id']),
-                fruit_type=saved_data['fruit_type'],
-                confidence=float(saved_data['confidence']),
+                detection_id=UUID(saved_detection['detection_id']),
+                user_id=UUID(saved_detection['user_id']),
+                image_id=UUID(saved_detection['image_id']),
+                fruit_type=saved_detection['fruit_type'],
+                confidence=float(saved_detection['confidence']),
                 bounding_box=BoundingBox(
                     x=float(bbox_data.get('center_x', 0)),
                     y=float(bbox_data.get('center_y', 0)),
                     width=float(bbox_data.get('width', 0)),
                     height=float(bbox_data.get('height', 0))
                 ),
-                created_at=datetime.fromisoformat(saved_data['created_at'].replace('Z', '+00:00'))
+                classification=classification_response,
+                created_at=datetime.fromisoformat(saved_detection['created_at'].replace('Z', '+00:00'))
             )
             
             detection_results.append(detection_response)
@@ -164,15 +233,45 @@ async def process_batch_images(image_ids: List[UUID], user_id: UUID) -> BatchDet
     )
 
 async def get_detection_by_id(detection_id: UUID) -> DetectionResponse:
-    """Retrieve a specific detection result"""
+    """Retrieve a specific detection result with classification data"""
+    # Get detection data
     result = admin_supabase.table("detection_results").select("*").eq("detection_id", str(detection_id)).execute()
     
     if not result.data:
         raise Exception("Detection result not found")
     
-    from src.schemas.detection import BoundingBox
+    from src.schemas.detection import BoundingBox, ClassificationResult
     saved_data = result.data[0]
     bbox_data = saved_data['bounding_box']
+    
+    # Get classification data from classification_results table
+    classification_response = None
+    classification_result = admin_supabase.table("classification_results")\
+        .select("*")\
+        .eq("detection_id", str(detection_id))\
+        .execute()
+    
+    if classification_result.data:
+        class_data = classification_result.data[0]
+        
+        # Get disease data
+        disease_result = admin_supabase.table("disease_detections")\
+            .select("*")\
+            .eq("detection_id", str(detection_id))\
+            .execute()
+        
+        defects = []
+        if disease_result.data and disease_result.data[0].get('is_diseased'):
+            defects.append(disease_result.data[0].get('disease_type', 'unknown'))
+        
+        classification_response = ClassificationResult(
+            ripeness_level=class_data.get('ripeness_level'),
+            ripeness_confidence=class_data.get('confidence_score'),
+            color=class_data.get('estimated_color'),
+            size=class_data.get('estimated_size'),
+            quality_score=None,
+            defects=defects
+        )
     
     return DetectionResponse(
         detection_id=UUID(saved_data['detection_id']),
@@ -186,11 +285,12 @@ async def get_detection_by_id(detection_id: UUID) -> DetectionResponse:
             width=float(bbox_data.get('width', 0)),
             height=float(bbox_data.get('height', 0))
         ),
+        classification=classification_response,
         created_at=datetime.fromisoformat(saved_data['created_at'].replace('Z', '+00:00'))
     )
 
 async def get_all_detections(user_id: UUID, limit: int = 10, offset: int = 0) -> List[DetectionResponse]:
-    """Retrieve all detection results for a user"""
+    """Retrieve all detection results for a user with classification data"""
     result = admin_supabase.table("detection_results")\
         .select("*")\
         .eq("user_id", str(user_id))\
@@ -202,11 +302,42 @@ async def get_all_detections(user_id: UUID, limit: int = 10, offset: int = 0) ->
     if not result.data:
         return []
     
-    from src.schemas.detection import BoundingBox
+    from src.schemas.detection import BoundingBox, ClassificationResult
     detections = []
     
     for item in result.data:
         bbox_data = item['bounding_box']
+        detection_id = item['detection_id']
+        
+        # Get classification data from classification_results table
+        classification_response = None
+        classification_result = admin_supabase.table("classification_results")\
+            .select("*")\
+            .eq("detection_id", detection_id)\
+            .execute()
+        
+        if classification_result.data:
+            class_data = classification_result.data[0]
+            
+            # Get disease data
+            disease_result = admin_supabase.table("disease_detections")\
+                .select("*")\
+                .eq("detection_id", detection_id)\
+                .execute()
+            
+            defects = []
+            if disease_result.data and disease_result.data[0].get('is_diseased'):
+                defects.append(disease_result.data[0].get('disease_type', 'unknown'))
+            
+            classification_response = ClassificationResult(
+                ripeness_level=class_data.get('ripeness_level'),
+                ripeness_confidence=class_data.get('confidence_score'),
+                color=class_data.get('estimated_color'),
+                size=class_data.get('estimated_size'),
+                quality_score=None,
+                defects=defects
+            )
+        
         detection = DetectionResponse(
             detection_id=UUID(item['detection_id']),
             user_id=UUID(item['user_id']),
@@ -219,6 +350,7 @@ async def get_all_detections(user_id: UUID, limit: int = 10, offset: int = 0) ->
                 width=float(bbox_data.get('width', 0)),
                 height=float(bbox_data.get('height', 0))
             ),
+            classification=classification_response,
             created_at=datetime.fromisoformat(item['created_at'].replace('Z', '+00:00'))
         )
         detections.append(detection)

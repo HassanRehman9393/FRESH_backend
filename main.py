@@ -17,6 +17,15 @@ async def lifespan(app: FastAPI):
     # Startup events
     print(f"🚀 Starting {settings.app_name} v{settings.app_version}")
     
+    # Log ML API configuration
+    print(f"🤖 ML API URL: {settings.ml_api_url}")
+    print(f"⏱️  ML API Timeout: {settings.ml_api_timeout}s")
+    
+    # Warn if ML API URL is localhost in production
+    if not settings.debug and "localhost" in settings.ml_api_url.lower():
+        print("⚠️  WARNING: ML_API_URL is set to localhost but DEBUG=False")
+        print("💡 Set ML_API_URL environment variable to your deployed ML API URL")
+    
     # Check database connectivity (non-blocking)
     try:
         db_healthy = await check_database_health_async()

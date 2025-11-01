@@ -23,6 +23,10 @@ class MLClient:
         )
         self.max_retries = getattr(settings, 'ml_api_max_retries', 3)
         
+        # Log ML API configuration on initialization
+        logger.info(f"ðŸ¤– ML API Client initialized with base_url: {self.base_url}")
+        logger.info(f"â±ï¸  ML API timeout: {settings.ml_api_timeout}s, max retries: {self.max_retries}")
+        
     async def health_check(self) -> Dict[str, Any]:
         """Check ML API health status"""
         try:
@@ -95,15 +99,20 @@ class MLClient:
                     )
                     response.raise_for_status()
                     return response.json()
-                    
+                
             except httpx.HTTPStatusError as e:
                 logger.error(f"ML API returned error: {e.response.status_code} - {e.response.text}")
                 raise Exception(f"ML detection failed: {e.response.text}")
             except httpx.TimeoutException as e:
                 logger.error(f"ML API request timed out: {str(e)}")
                 raise  # Re-raise to allow retry
+            except httpx.ConnectError as e:
+                logger.error(f"âŒ ML API connection failed to {self.base_url}: {str(e)}")
+                logger.error(f"ðŸ’¡ Check if ML_API_URL environment variable is set correctly")
+                raise Exception(f"Cannot connect to ML API at {self.base_url}: {str(e)}")
             except Exception as e:
                 logger.error(f"ML API request failed: {str(e)}")
+                logger.error(f"ML API URL being used: {self.base_url}")
                 raise Exception(f"Failed to communicate with ML API: {str(e)}")
         
         return await self._retry_request(_make_request)
