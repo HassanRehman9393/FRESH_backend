@@ -2,3 +2,7 @@ from .auth import router as auth_router
 from .images import router as images_router
 from .detection import router as detection_router
 from .disease import router as disease_router
+from .orchards import router as orchards_router
+from .weather import router as weather_router
+from .alerts import router as alerts_router
+from .weather_risk import router as weather_risk_router

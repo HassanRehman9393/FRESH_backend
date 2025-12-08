@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     ml_api_timeout: int = Field(default=300, alias="ML_API_TIMEOUT")  # 5 minutes for ML processing
     ml_api_max_retries: int = Field(default=3, alias="ML_API_MAX_RETRIES")
     
+    # Weather API Configuration
+    openweather_api_key: str = Field(default="", alias="OPENWEATHER_API_KEY")
+    weather_cache_ttl_minutes: int = Field(default=30, alias="WEATHER_CACHE_TTL_MINUTES")
+    weather_update_interval_minutes: int = Field(default=30, alias="WEATHER_UPDATE_INTERVAL_MINUTES")
+    weather_forecast_days: int = Field(default=5, alias="WEATHER_FORECAST_DAYS")
+    
     # Application Info
     app_name: str = "FRESH Backend API"
     app_version: str = "1.0.0"
