@@ -7,8 +7,32 @@ from src.services.image_service import get_image_service
 from src.services.ml_client import ml_client
 import base64
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+def parse_timestamp(timestamp_str: str) -> datetime:
+    """
+    Parse timestamp string handling malformed microseconds.
+    Handles timestamps with 5 digits in microseconds (e.g., '2025-12-08T18:35:13.38692+00:00')
+    """
+    try:
+        # Remove 'Z' and replace with '+00:00' if present
+        timestamp_str = timestamp_str.replace('Z', '+00:00')
+        
+        # Fix microseconds if they have wrong number of digits
+        # Pattern: YYYY-MM-DDTHH:MM:SS.xxxxx+00:00 (5 digits) -> YYYY-MM-DDTHH:MM:SS.xxxxxx+00:00 (6 digits)
+        match = re.match(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d+)([\+\-]\d{2}:\d{2})', timestamp_str)
+        if match:
+            date_part, microseconds, timezone = match.groups()
+            # Pad or truncate microseconds to exactly 6 digits
+            microseconds = microseconds.ljust(6, '0')[:6]
+            timestamp_str = f"{date_part}.{microseconds}{timezone}"
+        
+        return datetime.fromisoformat(timestamp_str)
+    except Exception as e:
+        logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}. Using current time.")
+        return datetime.utcnow()
 
 async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionResponse:
     """
@@ -228,7 +252,7 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
                     height=float(bbox_data.get('height', 0))
                 ),
                 classification=classification_response,
-                created_at=datetime.fromisoformat(saved_detection['created_at'].replace('Z', '+00:00')),
+                created_at=parse_timestamp(saved_detection['created_at']),
                 annotated_image_url=saved_detection.get('annotated_image_url'),
                 annotated_image_filename=saved_detection.get('annotated_image_filename')
             )
@@ -338,7 +362,7 @@ async def get_detection_by_id(detection_id: UUID) -> DetectionResponse:
             height=float(bbox_data.get('height', 0))
         ),
         classification=classification_response,
-        created_at=datetime.fromisoformat(saved_data['created_at'].replace('Z', '+00:00')),
+        created_at=parse_timestamp(saved_data['created_at']),
         annotated_image_url=saved_data.get('annotated_image_url'),
         annotated_image_filename=saved_data.get('annotated_image_filename')
     )
@@ -405,7 +429,7 @@ async def get_all_detections(user_id: UUID, limit: int = 10, offset: int = 0) ->
                 height=float(bbox_data.get('height', 0))
             ),
             classification=classification_response,
-            created_at=datetime.fromisoformat(item['created_at'].replace('Z', '+00:00')),
+            created_at=parse_timestamp(item['created_at']),
             annotated_image_url=item.get('annotated_image_url'),
             annotated_image_filename=item.get('annotated_image_filename')
         )

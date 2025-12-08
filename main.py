@@ -56,6 +56,15 @@ app = FastAPI(
     debug=settings.debug,
 )
 
+# Add request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all incoming requests for debugging"""
+    print(f"📥 [{request.method}] {request.url.path} - Origin: {request.headers.get('origin', 'N/A')}")
+    response = await call_next(request)
+    print(f"📤 [{request.method}] {request.url.path} - Status: {response.status_code}")
+    return response
+
 # Add CORS middleware - Use settings-based origins for DigitalOcean deployment
 print("🔧 Configuring CORS for DigitalOcean deployment")
 
