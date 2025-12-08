@@ -67,6 +67,40 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
         if not first_result.get('detection_results') or len(first_result['detection_results']) == 0:
             raise Exception("No fruits detected in image")
         
+        # Extract visualization if available
+        visualization_base64 = first_result.get('visualization_base64')
+        annotated_url = None
+        annotated_filename = None
+        
+        if visualization_base64:
+            try:
+                logger.info(f"Processing visualization for image {image_id}")
+                # Remove data URI prefix if present
+                if ',' in visualization_base64:
+                    visualization_base64 = visualization_base64.split(',', 1)[1]
+                
+                # Decode base64 to bytes
+                img_data = base64.b64decode(visualization_base64)
+                logger.info(f"Decoded visualization, size: {len(img_data)} bytes")
+                
+                # Generate filename for annotated image
+                annotated_filename = f"annotated_{image_id}.jpg"
+                
+                # Upload to Supabase Storage 'detection-visualizations' bucket
+                upload_result = admin_supabase.storage.from_('detection-visualizations').upload(
+                    path=annotated_filename,
+                    file=img_data,
+                    file_options={"content-type": "image/jpeg", "upsert": "true"}
+                )
+                
+                # Get public URL
+                annotated_url = admin_supabase.storage.from_('detection-visualizations').get_public_url(annotated_filename)
+                logger.info(f"Visualization uploaded successfully: {annotated_url}")
+                
+            except Exception as viz_error:
+                logger.error(f"Failed to process visualization: {str(viz_error)}")
+                # Don't fail the entire detection if visualization fails
+        
         # Save ALL detected fruits (not just the first one)
         detection_results = []
         
@@ -100,6 +134,8 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
                 "fruit_type": fruit_detection.get('fruit_type'),
                 "confidence": fruit_detection.get('detection_confidence'),
                 "bounding_box": fruit_detection.get('bounding_box'),
+                "annotated_image_url": annotated_url,
+                "annotated_image_filename": annotated_filename,
                 "created_at": datetime.utcnow().isoformat()
             }
             
@@ -178,7 +214,9 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
                     height=float(bbox_data.get('height', 0))
                 ),
                 classification=classification_response,
-                created_at=datetime.fromisoformat(saved_detection['created_at'].replace('Z', '+00:00'))
+                created_at=datetime.fromisoformat(saved_detection['created_at'].replace('Z', '+00:00')),
+                annotated_image_url=saved_detection.get('annotated_image_url'),
+                annotated_image_filename=saved_detection.get('annotated_image_filename')
             )
             
             detection_results.append(detection_response)
@@ -286,7 +324,9 @@ async def get_detection_by_id(detection_id: UUID) -> DetectionResponse:
             height=float(bbox_data.get('height', 0))
         ),
         classification=classification_response,
-        created_at=datetime.fromisoformat(saved_data['created_at'].replace('Z', '+00:00'))
+        created_at=datetime.fromisoformat(saved_data['created_at'].replace('Z', '+00:00')),
+        annotated_image_url=saved_data.get('annotated_image_url'),
+        annotated_image_filename=saved_data.get('annotated_image_filename')
     )
 
 async def get_all_detections(user_id: UUID, limit: int = 10, offset: int = 0) -> List[DetectionResponse]:
@@ -351,7 +391,9 @@ async def get_all_detections(user_id: UUID, limit: int = 10, offset: int = 0) ->
                 height=float(bbox_data.get('height', 0))
             ),
             classification=classification_response,
-            created_at=datetime.fromisoformat(item['created_at'].replace('Z', '+00:00'))
+            created_at=datetime.fromisoformat(item['created_at'].replace('Z', '+00:00')),
+            annotated_image_url=item.get('annotated_image_url'),
+            annotated_image_filename=item.get('annotated_image_filename')
         )
         detections.append(detection)
     

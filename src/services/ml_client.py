@@ -64,7 +64,7 @@ class MLClient:
         image_base64: str,
         user_id: str,
         image_name: str = "image.jpg",
-        return_visualization: bool = False,
+        return_visualization: bool = True,
         confidence_threshold: Optional[float] = None
     ) -> Dict[str, Any]:
         """

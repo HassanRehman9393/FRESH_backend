@@ -34,6 +34,9 @@ class DetectionResponse(BaseModel):
     bounding_box: BoundingBox
     classification: Optional[ClassificationResult] = None  # Add classification data
     created_at: datetime
+    # Visualization fields
+    annotated_image_url: Optional[str] = None
+    annotated_image_filename: Optional[str] = None
 
 class BatchDetectionRequest(BaseModel):
     """Schema for batch detection request"""
