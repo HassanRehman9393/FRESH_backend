@@ -98,8 +98,24 @@ class MLClient:
                         json=payload
                     )
                     response.raise_for_status()
-                    return response.json()
-                
+                    result = response.json()
+                    
+                    # Log visualization info
+                    if result.get('success') and result.get('results'):
+                        first_result = result['results'][0]
+                        has_viz = first_result.get('visualization_available', False)
+                        viz_base64 = first_result.get('visualization_base64')
+                        logger.info(f"✅ [ML Client] ML API response received")
+                        logger.info(f"✅ [ML Client] visualization_available: {has_viz}")
+                        if viz_base64:
+                            logger.info(f"✅ [ML Client] visualization_base64 length: {len(viz_base64)} chars")
+                            logger.info(f"✅ [ML Client] visualization_base64 preview: {viz_base64[:100]}...")
+                        else:
+                            logger.warning(f"⚠️  [ML Client] visualization_base64 is None or empty!")
+                    else:
+                        logger.warning(f"⚠️  [ML Client] ML API returned unsuccessful response")
+                    
+                    return result           
             except httpx.HTTPStatusError as e:
                 logger.error(f"ML API returned error: {e.response.status_code} - {e.response.text}")
                 raise Exception(f"ML detection failed: {e.response.text}")

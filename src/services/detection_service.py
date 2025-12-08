@@ -72,19 +72,28 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
         annotated_url = None
         annotated_filename = None
         
+        logger.info(f"📊 [Detection Service] Checking for visualization in ML response")
+        logger.info(f"📊 [Detection Service] visualization_available: {first_result.get('visualization_available')}")
+        logger.info(f"📊 [Detection Service] visualization_base64 exists: {visualization_base64 is not None}")
+        
         if visualization_base64:
             try:
-                logger.info(f"Processing visualization for image {image_id}")
+                logger.info(f"🎨 [Detection Service] Processing visualization for image {image_id}")
+                logger.info(f"🎨 [Detection Service] Original visualization_base64 length: {len(visualization_base64)} chars")
+                
                 # Remove data URI prefix if present
                 if ',' in visualization_base64:
+                    logger.info(f"🎨 [Detection Service] Removing data URI prefix")
                     visualization_base64 = visualization_base64.split(',', 1)[1]
                 
                 # Decode base64 to bytes
                 img_data = base64.b64decode(visualization_base64)
-                logger.info(f"Decoded visualization, size: {len(img_data)} bytes")
+                logger.info(f"🎨 [Detection Service] Decoded visualization, size: {len(img_data)} bytes")
                 
                 # Generate filename for annotated image
                 annotated_filename = f"annotated_{image_id}.jpg"
+                logger.info(f"💾 [Detection Service] Uploading to bucket: detection-visualizations")
+                logger.info(f"💾 [Detection Service] Filename: {annotated_filename}")
                 
                 # Upload to Supabase Storage 'detection-visualizations' bucket
                 upload_result = admin_supabase.storage.from_('detection-visualizations').upload(
@@ -92,10 +101,13 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
                     file=img_data,
                     file_options={"content-type": "image/jpeg", "upsert": "true"}
                 )
+                logger.info(f"💾 [Detection Service] Upload result: {upload_result}")
                 
                 # Get public URL
                 annotated_url = admin_supabase.storage.from_('detection-visualizations').get_public_url(annotated_filename)
-                logger.info(f"Visualization uploaded successfully: {annotated_url}")
+                logger.info(f"✅ [Detection Service] Visualization uploaded successfully!")
+                logger.info(f"✅ [Detection Service] Public URL: {annotated_url}")
+                logger.info(f"✅ [Detection Service] URL length: {len(annotated_url)} chars")
                 
             except Exception as viz_error:
                 logger.error(f"Failed to process visualization: {str(viz_error)}")
@@ -139,7 +151,9 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
                 "created_at": datetime.utcnow().isoformat()
             }
             
-            logger.info(f"Saving detection result for {fruit_detection.get('fruit_type')} with confidence {fruit_detection.get('detection_confidence')}")
+            logger.info(f"💾 [Detection Service] Saving detection result for {fruit_detection.get('fruit_type')} with confidence {fruit_detection.get('detection_confidence')}")
+            logger.info(f"💾 [Detection Service] annotated_image_url in record: {annotated_url}")
+            logger.info(f"💾 [Detection Service] annotated_image_filename in record: {annotated_filename}")
             
             detection_result = admin_supabase.table("detection_results").insert(detection_record).execute()
             
