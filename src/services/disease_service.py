@@ -48,6 +48,8 @@ async def process_single_disease_detection(detection_id: UUID, user_id: UUID) ->
         # Convert image bytes to base64
         image_base64 = base64.b64encode(file_response).decode('utf-8')
         
+        logger.info(f"🔍 Sending to ML API - fruit_type: {detection.fruit_type}, image size: {len(file_response)/1024:.1f}KB")
+        
         # Send to ML API for disease detection
         ml_result = await ml_client.detect_disease_base64(
             image_base64=image_base64,
@@ -56,7 +58,8 @@ async def process_single_disease_detection(detection_id: UUID, user_id: UUID) ->
             fruit_type=detection.fruit_type  # Use detected fruit type as hint
         )
         
-        logger.info(f"ML disease detection response received: {ml_result.get('success')}")
+        logger.info(f"✅ ML disease detection response received: success={ml_result.get('success')}, message={ml_result.get('message')}")
+        logger.info(f"📊 Disease results count: {len(ml_result.get('disease_results', []))}")
         
         # Extract disease detection results from ML response
         if not ml_result.get('success'):

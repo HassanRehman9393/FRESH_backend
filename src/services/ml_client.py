@@ -214,6 +214,8 @@ class MLClient:
             if confidence_threshold is not None:
                 params["confidence_threshold"] = confidence_threshold
             
+            logger.info(f"🦠 Calling ML API disease detection - fruit_type: {fruit_type}, params: {params}")
+            
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
                     f"{self.base_url}/api/disease/detect/base64",
