@@ -168,7 +168,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8080
 
 ```powershell
 # Run without reload
-uvicorn main:app --host 0.0.0.0 --port 8000
+uvicorn main:app --host 0.0.0.0 --port 8000 / 8080
 ```
 
 The API will be available at:

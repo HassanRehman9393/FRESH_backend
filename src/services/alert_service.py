@@ -1,6 +1,7 @@
 """
 Alert Service - Evaluates weather forecasts against alert rules
 Automatically generates alerts for Pakistani fruit orchards
+Includes email notification support for immediate farmer alerts
 """
 
 from typing import List, Dict, Any, Optional
@@ -10,6 +11,7 @@ import logging
 
 from src.core.supabase_client import supabase
 from src.services.weather_service import WeatherService
+from src.services.email_service import email_service
 from src.schemas.weather import WeatherForecastResponse
 
 logger = logging.getLogger(__name__)
@@ -540,30 +542,134 @@ class AlertService:
             logger.error(f"Error checking existing alerts: {str(e)}")
             return False
     
-    async def create_alert(self, alert_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def create_alert(
+        self, 
+        alert_data: Dict[str, Any],
+        orchard_data: Optional[Dict[str, Any]] = None,
+        user_data: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
         """
-        Create a new weather alert in the database
+        Create a new weather alert in the database and send email notification
         
         Args:
             alert_data: Alert information
+            orchard_data: Orchard details (for email context)
+            user_data: User details (for email recipient)
         
         Returns:
             Created alert or None if failed
         """
         try:
+            # Create alert in database
             response = supabase.table("weather_alerts")\
                 .insert(alert_data)\
                 .execute()
             
-            if response.data:
-                logger.info(f"Alert created: {response.data[0]['id']}")
-                return response.data[0]
+            if not response.data:
+                logger.error("Failed to create alert in database")
+                return None
             
-            return None
+            created_alert = response.data[0]
+            logger.info(f"✅ Alert created: {created_alert['id']} ({alert_data.get('severity', 'unknown').upper()})")
+            
+            # Send email notification (async, non-blocking)
+            try:
+                await self._send_alert_email_notification(
+                    alert=created_alert,
+                    orchard_data=orchard_data,
+                    user_data=user_data
+                )
+            except Exception as email_error:
+                # Log error but don't fail alert creation
+                logger.error(f"⚠️ Email notification failed (alert still created): {str(email_error)}")
+            
+            return created_alert
         
         except Exception as e:
-            logger.error(f"Error creating alert: {str(e)}")
+            logger.error(f"❌ Error creating alert: {str(e)}")
             return None
+    
+    async def _send_alert_email_notification(
+        self,
+        alert: Dict[str, Any],
+        orchard_data: Optional[Dict[str, Any]] = None,
+        user_data: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Send email notification for a newly created alert
+        
+        Args:
+            alert: Created alert data from database
+            orchard_data: Orchard information (optional, will fetch if not provided)
+            user_data: User information (optional, will fetch if not provided)
+        """
+        try:
+            orchard_id = alert.get("orchard_id")
+            
+            # Fetch orchard data if not provided
+            if not orchard_data:
+                orchard_response = supabase.table("orchards")\
+                    .select("*")\
+                    .eq("id", orchard_id)\
+                    .single()\
+                    .execute()
+                
+                if not orchard_response.data:
+                    logger.error(f"Orchard not found: {orchard_id}")
+                    return
+                
+                orchard_data = orchard_response.data
+            
+            # Fetch user data if not provided
+            if not user_data:
+                user_id = orchard_data.get("user_id")
+                user_response = supabase.table("users")\
+                    .select("id, email, full_name")\
+                    .eq("id", user_id)\
+                    .single()\
+                    .execute()
+                
+                if not user_response.data:
+                    logger.error(f"User not found: {user_id}")
+                    return
+                
+                user_data = user_response.data
+            
+            # Extract email details
+            to_email = user_data.get("email")
+            to_name = user_data.get("full_name", "Farmer")
+            
+            if not to_email:
+                logger.error("User email not found - cannot send alert email")
+                return
+            
+            # Build location string
+            location = None
+            if orchard_data.get("latitude") and orchard_data.get("longitude"):
+                location = f"{orchard_data['latitude']:.4f}, {orchard_data['longitude']:.4f}"
+            
+            # Send email
+            success = await email_service.send_alert_email(
+                to_email=to_email,
+                to_name=to_name,
+                orchard_name=orchard_data.get("name", "Unknown Orchard"),
+                alert_type=alert.get("alert_type", "Weather Alert"),
+                severity=alert.get("severity", "medium"),
+                message=alert.get("message", "Weather conditions require attention"),
+                recommendation=alert.get("recommendation", "Monitor your orchard closely"),
+                diseases_at_risk=alert.get("diseases_at_risk", []),
+                triggered_at=datetime.fromisoformat(alert["triggered_at"].replace('Z', '+00:00')) if alert.get("triggered_at") else datetime.utcnow(),
+                location=location
+            )
+            
+            if success:
+                logger.info(f"📧 Email notification sent to {to_email} for alert {alert['id']}")
+            else:
+                logger.warning(f"⚠️ Email notification failed for alert {alert['id']}")
+        
+        except Exception as e:
+            logger.error(f"❌ Error sending alert email notification: {str(e)}")
+            # Don't raise - email failure shouldn't break alert creation
     
     async def evaluate_all_orchards(self) -> Dict[str, Any]:
         """
@@ -584,29 +690,42 @@ class AlertService:
                 return {"total_orchards": 0, "alerts_created": 0}
             
             total_alerts = 0
+            emails_sent = 0
             
             for orchard in orchards_response.data:
+                # Evaluate alerts for this orchard
                 alerts = await self.evaluate_orchard_alerts(
                     orchard_id=orchard["id"],
                     orchard_data=orchard
                 )
                 
-                # Create alerts in database
+                # Create alerts in database and send email notifications
                 for alert_data in alerts:
-                    created = await self.create_alert(alert_data)
+                    created = await self.create_alert(
+                        alert_data=alert_data,
+                        orchard_data=orchard,
+                        user_data=None  # Will be fetched automatically
+                    )
                     if created:
                         total_alerts += 1
+                        # Email sending is handled in create_alert
+                        emails_sent += 1
             
             logger.info(
-                f"Alert evaluation complete: {len(orchards_response.data)} orchards, "
-                f"{total_alerts} alerts created"
+                f"✅ Alert evaluation complete: {len(orchards_response.data)} orchards, "
+                f"{total_alerts} alerts created, {emails_sent} email notifications sent"
             )
             
             return {
                 "total_orchards": len(orchards_response.data),
                 "alerts_created": total_alerts,
+                "emails_sent": emails_sent,
                 "evaluated_at": datetime.utcnow().isoformat()
             }
+        
+        except Exception as e:
+            logger.error(f"Error evaluating all orchards: {str(e)}")
+            return {"error": str(e)}
         
         except Exception as e:
             logger.error(f"Error evaluating all orchards: {str(e)}")

@@ -398,6 +398,8 @@ async def evaluate_orchard_alerts(
     Checks 5-day weather forecast against all applicable alert rules
     and creates alerts if conditions are met.
     
+    Email notifications are sent automatically when alerts are created.
+    
     This endpoint is for TESTING - in production, alerts are generated
     automatically by a background scheduler.
     """
@@ -423,12 +425,18 @@ async def evaluate_orchard_alerts(
             orchard_data=orchard
         )
         
-        # Create alerts in database
+        # Create alerts in database (emails sent automatically)
         created_alerts = []
+        emails_sent = 0
         for alert_data in triggered_alerts:
-            created = await alert_service.create_alert(alert_data)
+            created = await alert_service.create_alert(
+                alert_data=alert_data,
+                orchard_data=orchard,
+                user_data=None  # Will fetch automatically
+            )
             if created:
                 created_alerts.append(created)
+                emails_sent += 1  # Email sent in create_alert
         
         return {
             "orchard_id": orchard_id,
@@ -437,6 +445,7 @@ async def evaluate_orchard_alerts(
             "rules_evaluated": "all applicable rules",
             "alerts_triggered": len(triggered_alerts),
             "alerts_created": len(created_alerts),
+            "emails_sent": emails_sent,
             "alerts": created_alerts
         }
     

@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     weather_update_interval_minutes: int = Field(default=30, alias="WEATHER_UPDATE_INTERVAL_MINUTES")
     weather_forecast_days: int = Field(default=5, alias="WEATHER_FORECAST_DAYS")
     
+    # Email Configuration
+    smtp_host: str = Field(default="smtp.gmail.com", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_username: str = Field(default="", alias="SMTP_USERNAME")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    smtp_from_email: str = Field(default="", alias="SMTP_FROM_EMAIL")
+    smtp_from_name: str = Field(default="FRESH - Fruit Disease Alert System", alias="SMTP_FROM_NAME")
+    email_enabled: bool = Field(default=True, alias="EMAIL_ENABLED")
+    email_send_alerts: bool = Field(default=True, alias="EMAIL_SEND_ALERTS")
+    
     # Application Info
     app_name: str = "FRESH Backend API"
     app_version: str = "1.0.0"
