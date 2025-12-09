@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 from src.schemas.weather import (
     CurrentWeatherResponse, 
     WeatherDataResponse,
-    WeatherForecastResponse
+    WeatherForecastResponse,
+    DailyForecastResponse
 )
 from src.services.weather_service import weather_service
 from src.services.alert_service import alert_service
@@ -89,10 +90,10 @@ async def get_current_weather(
         )
 
 
-@router.get("/forecast/{orchard_id}", response_model=List[WeatherForecastResponse])
+@router.get("/forecast/{orchard_id}", response_model=List[DailyForecastResponse])
 async def get_weather_forecast(
     orchard_id: str,
-    days: int = Query(default=5, ge=1, le=7, description="Number of forecast days (1-7)"),
+    days: int = Query(default=7, ge=1, le=7, description="Number of forecast days (1-7)"),
     use_cache: bool = Query(default=True, description="Use cached data if available"),
     current_user: UserResponse = Depends(get_current_user)
 ):
@@ -100,10 +101,10 @@ async def get_weather_forecast(
     Get weather forecast for a specific orchard
     
     - **orchard_id**: UUID of the orchard
-    - **days**: Number of days to forecast (1-7, default: 5)
+    - **days**: Number of days to forecast (1-7, default: 7)
     - **use_cache**: Whether to use cached data (default: true)
     
-    Returns hourly forecast data for the specified number of days
+    Returns daily forecast data for the specified number of days
     """
     try:
         # Verify orchard ownership

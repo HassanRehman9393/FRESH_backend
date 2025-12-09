@@ -19,7 +19,8 @@ from src.schemas.weather import (
     CurrentWeatherResponse,
     ForecastResponse,
     WeatherCacheCreate,
-    WeatherCondition
+    WeatherCondition,
+    DailyForecastResponse
 )
 
 logger = logging.getLogger(__name__)
@@ -101,10 +102,16 @@ class WeatherService:
         return WeatherDataCreate(
             orchard_id=orchard_id,
             temperature=main.get("temp", 0.0),
+            feels_like=main.get("feels_like"),
+            temp_min=main.get("temp_min"),
+            temp_max=main.get("temp_max"),
             humidity=main.get("humidity", 0.0),
+            pressure=main.get("pressure"),
             rainfall=rain.get("1h", 0.0),  # rainfall in last 1 hour
             wind_speed=wind.get("speed"),
+            visibility=api_response.get("visibility"),
             weather_condition=self._map_weather_condition(weather.get("main", "")),
+            description=weather.get("description"),
             source="openweathermap",
             recorded_at=datetime.fromtimestamp(api_response.get("dt", datetime.utcnow().timestamp()))
         )
@@ -287,49 +294,136 @@ class WeatherService:
         
         return weather_response
     
+    def _aggregate_daily_forecasts(
+        self,
+        hourly_forecasts: List[WeatherForecastResponse],
+        days: int = 7
+    ) -> List[DailyForecastResponse]:
+        """
+        Aggregate hourly forecasts into daily summaries
+        """
+        from collections import defaultdict
+        
+        if not hourly_forecasts:
+            return []
+        
+        # Group forecasts by date
+        daily_data = defaultdict(list)
+        for forecast in hourly_forecasts:
+            # Handle both datetime objects and strings
+            if isinstance(forecast.forecast_time, str):
+                forecast_dt = datetime.fromisoformat(forecast.forecast_time.replace('Z', '+00:00'))
+            else:
+                forecast_dt = forecast.forecast_time
+            
+            date_key = forecast_dt.date().isoformat()
+            daily_data[date_key].append({
+                'forecast': forecast,
+                'datetime': forecast_dt
+            })
+        
+        # Aggregate each day
+        daily_forecasts = []
+        for date_str, items in sorted(daily_data.items())[:7]:  # Limit to 7 days
+            forecasts = [item['forecast'] for item in items]
+            forecast_times = [item['datetime'] for item in items]
+            date_obj = datetime.fromisoformat(date_str)
+            
+            # Get day and night temps (day: 12-18, night: 0-6 or 21-23)
+            day_temps = [f.temperature for f, dt in zip(forecasts, forecast_times) if 12 <= dt.hour <= 18]
+            night_temps = [f.temperature for f, dt in zip(forecasts, forecast_times) if dt.hour <= 6 or dt.hour >= 21]
+            
+            temp_day = sum(day_temps) / len(day_temps) if day_temps else forecasts[0].temperature
+            temp_night = sum(night_temps) / len(night_temps) if night_temps else forecasts[-1].temperature
+            
+            # Get most common weather condition (use midday forecast)
+            midday_idx = next((i for i, dt in enumerate(forecast_times) if 12 <= dt.hour <= 15), 0)
+            midday_forecast = forecasts[midday_idx]
+            
+            # Map weather condition to icon code
+            icon_map = {
+                "clear": "01d",
+                "clouds": "03d",
+                "rain": "10d",
+                "drizzle": "09d",
+                "thunderstorm": "11d",
+                "snow": "13d",
+                "mist": "50d",
+                "fog": "50d"
+            }
+            condition_str = str(midday_forecast.weather_condition.value) if midday_forecast.weather_condition else "clear"
+            icon_code = icon_map.get(condition_str, "01d")
+            
+            # Calculate wind speed average (only for non-None values)
+            wind_speeds = [f.wind_speed for f in forecasts if f.wind_speed is not None]
+            avg_wind_speed = sum(wind_speeds) / len(wind_speeds) if wind_speeds else 0.0
+            
+            daily_forecast = DailyForecastResponse(
+                date=date_str,
+                day_of_week=date_obj.strftime('%A'),
+                temp_day=round(temp_day, 1),
+                temp_night=round(temp_night, 1),
+                temp_min=round(min(f.temperature for f in forecasts), 1),
+                temp_max=round(max(f.temperature for f in forecasts), 1),
+                humidity=round(sum(f.humidity for f in forecasts) / len(forecasts), 1),
+                description=midday_forecast.weather_description or "",
+                icon=icon_code,
+                wind_speed=round(avg_wind_speed, 1),
+                precipitation_probability=round(max((f.rainfall_probability or 0) for f in forecasts), 1),
+                rain_amount=round(sum(f.rainfall_amount for f in forecasts), 2)
+            )
+            daily_forecasts.append(daily_forecast)
+        
+        # Limit to requested number of days
+        return daily_forecasts[:days]
+    
     async def fetch_forecast(
         self,
         orchard_id: str,
         latitude: float,
         longitude: float,
-        days: int = 5,
+        days: int = 7,
         use_cache: bool = True
-    ) -> List[WeatherForecastResponse]:
+    ) -> List[DailyForecastResponse]:
         """
-        Fetch 5-day weather forecast (3-hour intervals)
-        Returns forecast data directly without database storage
+        Fetch 7-day weather forecast aggregated into daily summaries
+        Returns daily forecast data
         """
-        cache_key = f"weather:forecast:{orchard_id}"
+        cache_key = f"weather:forecast:{orchard_id}:{days}"
         
         # Try cache first
         if use_cache:
             cached_data = await self._get_cached_weather(cache_key)
             if cached_data:
-                return [WeatherForecastResponse(**item) for item in cached_data]
+                return [DailyForecastResponse(**item) for item in cached_data]
         
-        # Fetch from API
+        # Fetch from API (get more data points for better daily aggregation)
+        # OpenWeatherMap free tier provides 5 days / 3-hour forecast (40 data points)
         params = {
             "lat": latitude,
             "lon": longitude,
-            "cnt": days * 8,  # 8 data points per day (3-hour intervals)
+            "cnt": 40,  # Maximum available: 5 days of 3-hour intervals
             "appid": self.api_key,
             "units": "metric"
         }
         
         api_response = await self._make_api_request("forecast", params)
         
-        # Parse response
-        forecast_responses = self._parse_forecast_data(api_response, orchard_id)
+        # Parse hourly response
+        hourly_forecasts = self._parse_forecast_data(api_response, orchard_id)
         
-        # Cache the responses
+        # Aggregate into daily forecasts
+        daily_forecasts = self._aggregate_daily_forecasts(hourly_forecasts, days)
+        
+        # Cache the daily responses
         await self._set_cache(
             cache_key,
             "forecast",
             orchard_id,
-            [f.model_dump(mode='json') for f in forecast_responses]
+            [f.model_dump(mode='json') for f in daily_forecasts]
         )
         
-        return forecast_responses
+        return daily_forecasts
     
     async def get_current_weather_for_orchard(
         self,

@@ -118,10 +118,16 @@ class OrchardResponse(OrchardBase):
 class WeatherDataBase(BaseModel):
     """Base weather data schema - matches database columns"""
     temperature: float = Field(..., ge=-50, le=60)
+    feels_like: Optional[float] = Field(None, ge=-50, le=60)
+    temp_min: Optional[float] = Field(None, ge=-50, le=60)
+    temp_max: Optional[float] = Field(None, ge=-50, le=60)
     humidity: float = Field(..., ge=0, le=100)
+    pressure: Optional[float] = Field(None, ge=0)
     rainfall: float = Field(default=0, ge=0)
     wind_speed: Optional[float] = Field(None, ge=0)
+    visibility: Optional[float] = Field(None, ge=0)
     weather_condition: Optional[WeatherCondition] = None
+    description: Optional[str] = None
 
 
 class WeatherDataCreate(WeatherDataBase):
@@ -190,12 +196,28 @@ class WeatherForecastResponse(WeatherForecastBase):
 
 
 class ForecastResponse(BaseModel):
-    """Schema for complete forecast API response"""
+    """Schema for forecast response"""
     orchard_id: str
     orchard_name: str
     forecasts: List[WeatherForecastResponse]
     total_count: int
     fetched_at: datetime
+
+
+class DailyForecastResponse(BaseModel):
+    """Schema for daily aggregated forecast"""
+    date: str
+    day_of_week: str
+    temp_day: float
+    temp_night: float
+    temp_min: float
+    temp_max: float
+    humidity: float
+    description: str
+    icon: str
+    wind_speed: float
+    precipitation_probability: float
+    rain_amount: float
 
 
 # ============================================================================
