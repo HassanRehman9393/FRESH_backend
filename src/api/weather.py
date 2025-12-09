@@ -12,6 +12,7 @@ from src.schemas.weather import (
     WeatherForecastResponse
 )
 from src.services.weather_service import weather_service
+from src.services.alert_service import alert_service
 from src.core.supabase_client import supabase
 from src.api.deps import get_current_user
 from src.schemas.user import UserResponse
@@ -201,14 +202,17 @@ async def get_weather_history(
 @router.post("/update/{orchard_id}", response_model=CurrentWeatherResponse)
 async def force_weather_update(
     orchard_id: str,
+    auto_evaluate_alerts: bool = Query(default=True, description="Automatically evaluate alerts after update"),
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
     Force an immediate weather data update for an orchard
     
     - **orchard_id**: UUID of the orchard
+    - **auto_evaluate_alerts**: Automatically trigger alert evaluation (default: true)
     
-    Bypasses cache and fetches fresh data from OpenWeatherMap API
+    Bypasses cache and fetches fresh data from OpenWeatherMap API.
+    Stores data in weather_data table and optionally triggers alert evaluation.
     """
     try:
         # Verify orchard ownership
@@ -226,7 +230,7 @@ async def force_weather_update(
         
         orchard = orchard_response.data[0]
         
-        # Force fresh fetch (no cache)
+        # Force fresh fetch (no cache) - stores in weather_data table
         weather_data = await weather_service.fetch_current_weather(
             orchard_id=orchard_id,
             latitude=float(orchard["latitude"]),
@@ -234,7 +238,29 @@ async def force_weather_update(
             use_cache=False
         )
         
-        logger.info(f"Forced weather update for orchard {orchard_id}")
+        logger.info(f"Forced weather update for orchard {orchard_id} - data stored in weather_data table")
+        
+        # Automatically evaluate alerts based on new weather data
+        if auto_evaluate_alerts:
+            try:
+                alerts_created = await alert_service.evaluate_orchard_alerts(
+                    orchard_id=orchard_id,
+                    orchard_data=orchard,
+                    use_historical=True,  # Evaluate using weather_data table
+                    use_forecast=True     # Also check forecast
+                )
+                
+                # Store triggered alerts
+                if alerts_created:
+                    for alert_data in alerts_created:
+                        supabase.table("weather_alerts")\
+                            .insert(alert_data)\
+                            .execute()
+                    
+                    logger.info(f"Auto-evaluation created {len(alerts_created)} alerts for orchard {orchard_id}")
+            except Exception as e:
+                logger.error(f"Error during auto alert evaluation: {str(e)}")
+                # Don't fail the weather update if alert evaluation fails
         
         return CurrentWeatherResponse(
             orchard_id=orchard_id,

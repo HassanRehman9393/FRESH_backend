@@ -1,17 +1,12 @@
 """
-Weather Disease Risk API Endpoints
-Disease risk analysis based on weather conditions
+Disease Risk Summary API
+Aggregates weather alerts into actionable disease risk intelligence
+Simplified architecture - uses weather_alerts as single source of truth
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends, Query
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, status, Depends
+from typing import Dict, Any, List
 from datetime import datetime, timedelta
-from src.schemas.weather import (
-    DiseaseRiskResponse,
-    RiskLevel,
-    DiseaseType,
-    FruitType
-)
 from src.core.supabase_client import supabase
 from src.api.deps import get_current_user
 from src.schemas.user import UserResponse
@@ -22,333 +17,233 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/risk", tags=["disease-risk"])
 
 
-@router.get("/orchard/{orchard_id}", response_model=List[DiseaseRiskResponse])
-async def get_orchard_risk_analysis(
-    orchard_id: str,
-    risk_level: Optional[RiskLevel] = Query(None, description="Filter by risk level"),
-    fruit_type: Optional[FruitType] = Query(None, description="Filter by fruit type"),
+@router.get("/summary")
+async def get_risk_summary(
     current_user: UserResponse = Depends(get_current_user)
-):
+) -> Dict[str, Any]:
     """
-    Get latest disease risk analysis for a specific orchard
+    Get comprehensive disease risk summary across all user orchards
     
-    - **orchard_id**: UUID of the orchard
-    - **risk_level**: Filter by risk level (low, medium, high, critical)
-    - **fruit_type**: Filter by fruit type
+    Analyzes recent weather alerts to provide actionable intelligence:
+    - Total orchards monitored
+    - Alert severity distribution (critical, high, medium, low)
+    - Most at-risk orchards (by alert severity and count)
+    - Most prevalent diseases threatening your orchards
+    - Recent alert trends
     
-    Returns current disease risk assessments based on weather conditions
-    """
-    try:
-        # Verify orchard ownership
-        orchard_response = supabase.table("orchards")\
-            .select("id")\
-            .eq("id", orchard_id)\
-            .eq("user_id", current_user["user_id"])\
-            .execute()
-        
-        if not orchard_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Orchard not found"
-            )
-        
-        # Get latest risk analysis (within last 24 hours)
-        cutoff_time = datetime.utcnow() - timedelta(hours=24)
-        
-        query = supabase.table("weather_disease_risk")\
-            .select("*")\
-            .eq("orchard_id", orchard_id)\
-            .gte("calculated_at", cutoff_time.isoformat())
-        
-        if risk_level:
-            query = query.eq("risk_level", risk_level.value)
-        if fruit_type:
-            query = query.eq("fruit_type", fruit_type.value)
-        
-        response = query\
-            .order("calculated_at", desc=True)\
-            .execute()
-        
-        return response.data
+    **Data Source:** Aggregates from weather_alerts table (last 7 days)
     
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching risk analysis: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch risk analysis"
-        )
-
-
-@router.get("/orchard/{orchard_id}/high-risk", response_model=List[DiseaseRiskResponse])
-async def get_high_risk_diseases(
-    orchard_id: str,
-    current_user: UserResponse = Depends(get_current_user)
-):
-    """
-    Get high and critical risk diseases for an orchard
-    
-    - **orchard_id**: UUID of the orchard
-    
-    Returns only diseases with high or critical risk levels
-    """
-    try:
-        # Verify orchard ownership
-        orchard_response = supabase.table("orchards")\
-            .select("id")\
-            .eq("id", orchard_id)\
-            .eq("user_id", current_user["user_id"])\
-            .execute()
-        
-        if not orchard_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Orchard not found"
-            )
-        
-        # Get latest high/critical risks (within last 24 hours)
-        cutoff_time = datetime.utcnow() - timedelta(hours=24)
-        
-        response = supabase.table("weather_disease_risk")\
-            .select("*")\
-            .eq("orchard_id", orchard_id)\
-            .gte("calculated_at", cutoff_time.isoformat())\
-            .in_("risk_level", ["high", "critical"])\
-            .order("risk_score", desc=True)\
-            .execute()
-        
-        return response.data
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching high-risk diseases: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch high-risk diseases"
-        )
-
-
-@router.get("/disease/{disease_type}", response_model=List[DiseaseRiskResponse])
-async def get_disease_risk_across_orchards(
-    disease_type: DiseaseType,
-    risk_level: Optional[RiskLevel] = Query(None, description="Filter by risk level"),
-    current_user: UserResponse = Depends(get_current_user)
-):
-    """
-    Get risk analysis for a specific disease across all user's orchards
-    
-    - **disease_type**: Type of disease (anthracnose, citrus_canker, etc.)
-    - **risk_level**: Filter by risk level
-    
-    Returns risk assessments for the specified disease across all orchards
+    **Returns:**
+    ```json
+    {
+      "total_orchards": 5,
+      "alerts_summary": {
+        "total_alerts": 12,
+        "critical": 3,
+        "high": 5,
+        "medium": 3,
+        "low": 1,
+        "unacknowledged": 8
+      },
+      "at_risk_orchards": [
+        {
+          "orchard_id": "uuid",
+          "orchard_name": "Mango Farm A",
+          "alert_count": 4,
+          "highest_severity": "critical",
+          "critical_count": 2,
+          "latest_alert": "2025-12-09T10:30:00Z"
+        }
+      ],
+      "disease_threats": [
+        {
+          "disease": "anthracnose",
+          "affected_orchards": 3,
+          "total_alerts": 5,
+          "severity_breakdown": {"critical": 3, "high": 2}
+        }
+      ],
+      "last_updated": "2025-12-09T18:00:00Z"
+    }
+    ```
     """
     try:
         # Get user's orchards
         orchards_response = supabase.table("orchards")\
-            .select("id")\
+            .select("id, name, fruit_types")\
             .eq("user_id", current_user["user_id"])\
-            .eq("is_active", True)\
-            .execute()
-        
-        if not orchards_response.data:
-            return []
-        
-        orchard_ids = [o["id"] for o in orchards_response.data]
-        
-        # Get latest risk analysis (within last 24 hours)
-        cutoff_time = datetime.utcnow() - timedelta(hours=24)
-        
-        query = supabase.table("weather_disease_risk")\
-            .select("*")\
-            .eq("disease_type", disease_type.value)\
-            .in_("orchard_id", orchard_ids)\
-            .gte("calculated_at", cutoff_time.isoformat())
-        
-        if risk_level:
-            query = query.eq("risk_level", risk_level.value)
-        
-        response = query\
-            .order("risk_score", desc=True)\
-            .execute()
-        
-        return response.data
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching disease risk: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch disease risk"
-        )
-
-
-@router.get("/history/{orchard_id}", response_model=List[DiseaseRiskResponse])
-async def get_risk_history(
-    orchard_id: str,
-    disease_type: Optional[DiseaseType] = Query(None, description="Filter by disease type"),
-    start_date: Optional[datetime] = Query(None, description="Start date (default: 30 days ago)"),
-    end_date: Optional[datetime] = Query(None, description="End date (default: now)"),
-    current_user: UserResponse = Depends(get_current_user)
-):
-    """
-    Get historical disease risk analysis for an orchard
-    
-    - **orchard_id**: UUID of the orchard
-    - **disease_type**: Filter by specific disease
-    - **start_date**: Start date for history (default: 30 days ago)
-    - **end_date**: End date for history (default: now)
-    
-    Returns historical risk assessments for trend analysis
-    """
-    try:
-        # Verify orchard ownership
-        orchard_response = supabase.table("orchards")\
-            .select("id")\
-            .eq("id", orchard_id)\
-            .eq("user_id", current_user["user_id"])\
-            .execute()
-        
-        if not orchard_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Orchard not found"
-            )
-        
-        # Set default date range if not provided
-        if not end_date:
-            end_date = datetime.utcnow()
-        if not start_date:
-            start_date = end_date - timedelta(days=30)
-        
-        query = supabase.table("weather_disease_risk")\
-            .select("*")\
-            .eq("orchard_id", orchard_id)\
-            .gte("calculated_at", start_date.isoformat())\
-            .lte("calculated_at", end_date.isoformat())
-        
-        if disease_type:
-            query = query.eq("disease_type", disease_type.value)
-        
-        response = query\
-            .order("calculated_at", desc=True)\
-            .execute()
-        
-        return response.data
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching risk history: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch risk history"
-        )
-
-
-@router.get("/summary")
-async def get_risk_summary(
-    current_user: UserResponse = Depends(get_current_user)
-):
-    """
-    Get risk summary across all user's orchards
-    
-    Returns aggregated statistics:
-    - Total orchards analyzed
-    - Count of critical/high/medium/low risks
-    - Most at-risk orchards
-    - Most prevalent diseases
-    """
-    try:
-        
-        # Get user's active orchards
-        orchards_response = supabase.table("orchards")\
-            .select("id, name")\
-            .eq("user_id", current_user["user_id"])\
-            .eq("is_active", True)\
             .execute()
         
         if not orchards_response.data:
             return {
                 "total_orchards": 0,
-                "risk_counts": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+                "alerts_summary": {
+                    "total_alerts": 0,
+                    "critical": 0,
+                    "high": 0,
+                    "medium": 0,
+                    "low": 0,
+                    "unacknowledged": 0
+                },
                 "at_risk_orchards": [],
-                "prevalent_diseases": []
+                "disease_threats": [],
+                "last_updated": datetime.utcnow().isoformat()
             }
         
-        orchard_ids = [o["id"] for o in orchards_response.data]
+        orchards = orchards_response.data
+        orchard_ids = [o["id"] for o in orchards]
+        orchard_map = {o["id"]: {"name": o["name"], "fruit_types": o.get("fruit_types", [])} for o in orchards}
         
-        # Get latest risk assessments (within last 24 hours)
-        cutoff_time = datetime.utcnow() - timedelta(hours=24)
+        # Get alerts from last 7 days
+        seven_days_ago = datetime.utcnow() - timedelta(days=7)
         
-        risks_response = supabase.table("weather_disease_risk")\
+        alerts_response = supabase.table("weather_alerts")\
             .select("*")\
             .in_("orchard_id", orchard_ids)\
-            .gte("calculated_at", cutoff_time.isoformat())\
+            .gte("triggered_at", seven_days_ago.isoformat())\
+            .order("triggered_at", desc=True)\
             .execute()
         
-        risks = risks_response.data
+        alerts = alerts_response.data or []
         
-        # Calculate statistics
-        risk_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-        orchard_risk_scores = {}
-        disease_counts = {}
+        # Calculate alert severity distribution
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        unacknowledged_count = 0
         
-        for risk in risks:
-            # Count by risk level
-            risk_counts[risk["risk_level"]] += 1
+        for alert in alerts:
+            severity = alert.get("severity", "low")
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
             
-            # Track orchard risk scores
-            orchard_id = risk["orchard_id"]
-            if orchard_id not in orchard_risk_scores:
-                orchard_risk_scores[orchard_id] = []
-            orchard_risk_scores[orchard_id].append(risk["risk_score"])
+            if alert.get("acknowledged_at") is None:
+                unacknowledged_count += 1
+        
+        # Analyze orchards at risk (group alerts by orchard)
+        orchard_alerts = {}
+        for alert in alerts:
+            orch_id = alert["orchard_id"]
+            if orch_id not in orchard_alerts:
+                orchard_alerts[orch_id] = {
+                    "alerts": [],
+                    "critical_count": 0,
+                    "high_count": 0,
+                    "medium_count": 0,
+                    "low_count": 0
+                }
             
-            # Count disease occurrences
-            disease = risk["disease_type"]
-            disease_counts[disease] = disease_counts.get(disease, 0) + 1
+            orchard_alerts[orch_id]["alerts"].append(alert)
+            severity = alert.get("severity", "low")
+            orchard_alerts[orch_id][f"{severity}_count"] += 1
         
-        # Get top 5 at-risk orchards
-        orchard_avg_scores = {
-            oid: sum(scores) / len(scores) 
-            for oid, scores in orchard_risk_scores.items()
-        }
-        top_orchards = sorted(
-            orchard_avg_scores.items(), 
-            key=lambda x: x[1], 
-            reverse=True
-        )[:5]
+        # Build at-risk orchards list (sorted by severity priority)
+        at_risk_orchards = []
         
-        orchard_map = {o["id"]: o["name"] for o in orchards_response.data}
-        at_risk_orchards = [
-            {"orchard_id": oid, "name": orchard_map[oid], "avg_risk_score": score}
-            for oid, score in top_orchards
-        ]
+        for orch_id, data in orchard_alerts.items():
+            orchard_info = orchard_map.get(orch_id, {"name": "Unknown", "fruit_types": []})
+            
+            # Calculate risk score (weighted by severity)
+            risk_score = (
+                data["critical_count"] * 4 +
+                data["high_count"] * 3 +
+                data["medium_count"] * 2 +
+                data["low_count"] * 1
+            )
+            
+            # Determine highest severity
+            if data["critical_count"] > 0:
+                highest_severity = "critical"
+            elif data["high_count"] > 0:
+                highest_severity = "high"
+            elif data["medium_count"] > 0:
+                highest_severity = "medium"
+            else:
+                highest_severity = "low"
+            
+            # Get latest alert timestamp
+            latest_alert = max(a["triggered_at"] for a in data["alerts"]) if data["alerts"] else None
+            
+            at_risk_orchards.append({
+                "orchard_id": orch_id,
+                "orchard_name": orchard_info["name"],
+                "fruit_types": orchard_info["fruit_types"],
+                "alert_count": len(data["alerts"]),
+                "highest_severity": highest_severity,
+                "critical_count": data["critical_count"],
+                "high_count": data["high_count"],
+                "medium_count": data["medium_count"],
+                "low_count": data["low_count"],
+                "risk_score": risk_score,
+                "latest_alert": latest_alert
+            })
         
-        # Get top 5 prevalent diseases
-        prevalent_diseases = sorted(
-            disease_counts.items(), 
-            key=lambda x: x[1], 
-            reverse=True
-        )[:5]
-        prevalent_diseases = [
-            {"disease": disease, "occurrence_count": count}
-            for disease, count in prevalent_diseases
-        ]
+        # Sort by risk score (descending), then by alert count
+        at_risk_orchards.sort(key=lambda x: (x["risk_score"], x["alert_count"]), reverse=True)
         
+        # Analyze disease threats (extract from diseases_at_risk arrays)
+        disease_data = {}
+        
+        for alert in alerts:
+            diseases = alert.get("diseases_at_risk") or []
+            severity = alert.get("severity", "low")
+            orch_id = alert["orchard_id"]
+            
+            for disease in diseases:
+                if disease not in disease_data:
+                    disease_data[disease] = {
+                        "orchards": set(),
+                        "alerts": [],
+                        "severity_counts": {"critical": 0, "high": 0, "medium": 0, "low": 0}
+                    }
+                
+                disease_data[disease]["orchards"].add(orch_id)
+                disease_data[disease]["alerts"].append(alert)
+                disease_data[disease]["severity_counts"][severity] += 1
+        
+        # Build disease threats list
+        disease_threats = []
+        for disease, data in disease_data.items():
+            # Calculate threat score (weighted by severity and affected orchards)
+            threat_score = (
+                data["severity_counts"]["critical"] * 4 +
+                data["severity_counts"]["high"] * 3 +
+                data["severity_counts"]["medium"] * 2 +
+                data["severity_counts"]["low"] * 1
+            ) * len(data["orchards"])  # Multiply by number of affected orchards
+            
+            disease_threats.append({
+                "disease": disease,
+                "affected_orchards": len(data["orchards"]),
+                "total_alerts": len(data["alerts"]),
+                "severity_breakdown": data["severity_counts"],
+                "threat_score": threat_score
+            })
+        
+        # Sort diseases by threat score
+        disease_threats.sort(key=lambda x: x["threat_score"], reverse=True)
+        
+        # Remove threat_score from output (internal calculation only)
+        for threat in disease_threats:
+            del threat["threat_score"]
+        
+        # Build final summary response
         return {
-            "total_orchards": len(orchards_response.data),
-            "risk_counts": risk_counts,
-            "at_risk_orchards": at_risk_orchards,
-            "prevalent_diseases": prevalent_diseases,
+            "total_orchards": len(orchards),
+            "alerts_summary": {
+                "total_alerts": len(alerts),
+                "critical": severity_counts["critical"],
+                "high": severity_counts["high"],
+                "medium": severity_counts["medium"],
+                "low": severity_counts["low"],
+                "unacknowledged": unacknowledged_count
+            },
+            "at_risk_orchards": at_risk_orchards[:5],  # Top 5 most at-risk
+            "disease_threats": disease_threats[:10],  # Top 10 diseases
+            "analysis_period": "Last 7 days",
             "last_updated": datetime.utcnow().isoformat()
         }
     
     except Exception as e:
-        logger.error(f"Error generating risk summary: {str(e)}")
+        logger.error(f"Error generating risk summary: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate risk summary"
+            detail=f"Failed to generate risk summary: {str(e)}"
         )

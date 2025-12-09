@@ -129,9 +129,10 @@ class WeatherService:
         self,
         api_response: Dict[str, Any],
         orchard_id: str
-    ) -> List[WeatherForecastCreate]:
+    ) -> List[WeatherForecastResponse]:
         """
         Parse OpenWeatherMap 5-day forecast API response
+        Returns WeatherForecastResponse objects directly
         """
         forecasts = []
         forecast_list = api_response.get("list", [])
@@ -141,10 +142,12 @@ class WeatherService:
             wind = item.get("wind", {})
             rain = item.get("rain", {})
             weather = item.get("weather", [{}])[0]
+            forecast_time = datetime.fromtimestamp(item.get("dt"))
             
-            forecast = WeatherForecastCreate(
+            forecast = WeatherForecastResponse(
+                id=f"{orchard_id}_{item.get('dt')}",  # Generate unique ID
                 orchard_id=orchard_id,
-                forecast_time=datetime.fromtimestamp(item.get("dt")),
+                forecast_time=forecast_time,
                 temperature=main.get("temp", 0.0),
                 feels_like=main.get("feels_like"),
                 humidity=main.get("humidity", 0.0),
@@ -154,7 +157,8 @@ class WeatherService:
                 weather_condition=self._map_weather_condition(weather.get("main", "")),
                 weather_description=weather.get("description"),
                 source="openweathermap",
-                fetched_at=datetime.utcnow()
+                fetched_at=datetime.utcnow(),
+                created_at=datetime.utcnow()
             )
             forecasts.append(forecast)
         
@@ -293,6 +297,7 @@ class WeatherService:
     ) -> List[WeatherForecastResponse]:
         """
         Fetch 5-day weather forecast (3-hour intervals)
+        Returns forecast data directly without database storage
         """
         cache_key = f"weather:forecast:{orchard_id}"
         
@@ -306,29 +311,15 @@ class WeatherService:
         params = {
             "lat": latitude,
             "lon": longitude,
-            "cnt": days * 8  # 8 data points per day (3-hour intervals)
+            "cnt": days * 8,  # 8 data points per day (3-hour intervals)
+            "appid": self.api_key,
+            "units": "metric"
         }
         
         api_response = await self._make_api_request("forecast", params)
         
         # Parse response
-        forecast_data_list = self._parse_forecast_data(api_response, orchard_id)
-        
-        # Delete old forecasts for this orchard
-        supabase.table("weather_forecast")\
-            .delete()\
-            .eq("orchard_id", orchard_id)\
-            .execute()
-        
-        # Store in database
-        forecast_responses = []
-        for forecast_data in forecast_data_list:
-            result = supabase.table("weather_forecast")\
-                .insert(forecast_data.model_dump(mode='json'))\
-                .execute()
-            
-            if result.data:
-                forecast_responses.append(WeatherForecastResponse(**result.data[0]))
+        forecast_responses = self._parse_forecast_data(api_response, orchard_id)
         
         # Cache the responses
         await self._set_cache(

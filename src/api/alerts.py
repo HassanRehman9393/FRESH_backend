@@ -15,6 +15,7 @@ from src.schemas.weather import (
 from src.core.supabase_client import supabase
 from src.api.deps import get_current_user
 from src.schemas.user import UserResponse
+from src.services.alert_service import alert_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ async def get_user_alerts(
         # Apply pagination
         offset = (page - 1) * page_size
         response = query\
-            .order("created_at", desc=True)\
+            .order("triggered_at", desc=True)\
             .range(offset, offset + page_size - 1)\
             .execute()
         
@@ -381,4 +382,101 @@ async def delete_alert(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete alert"
+        )
+
+
+@router.post("/evaluate/{orchard_id}")
+async def evaluate_orchard_alerts(
+    orchard_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Manually trigger alert evaluation for a specific orchard
+    
+    - **orchard_id**: UUID of the orchard to evaluate
+    
+    Checks 5-day weather forecast against all applicable alert rules
+    and creates alerts if conditions are met.
+    
+    This endpoint is for TESTING - in production, alerts are generated
+    automatically by a background scheduler.
+    """
+    try:
+        # Verify orchard ownership
+        orchard_response = supabase.table("orchards")\
+            .select("*")\
+            .eq("id", orchard_id)\
+            .eq("user_id", current_user["user_id"])\
+            .execute()
+        
+        if not orchard_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Orchard not found"
+            )
+        
+        orchard = orchard_response.data[0]
+        
+        # Evaluate alerts
+        triggered_alerts = await alert_service.evaluate_orchard_alerts(
+            orchard_id=orchard_id,
+            orchard_data=orchard
+        )
+        
+        # Create alerts in database
+        created_alerts = []
+        for alert_data in triggered_alerts:
+            created = await alert_service.create_alert(alert_data)
+            if created:
+                created_alerts.append(created)
+        
+        return {
+            "orchard_id": orchard_id,
+            "orchard_name": orchard["name"],
+            "evaluation_time": datetime.utcnow().isoformat(),
+            "rules_evaluated": "all applicable rules",
+            "alerts_triggered": len(triggered_alerts),
+            "alerts_created": len(created_alerts),
+            "alerts": created_alerts
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error evaluating orchard alerts: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to evaluate alerts: {str(e)}"
+        )
+
+
+@router.post("/evaluate-all")
+async def evaluate_all_orchards(
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Manually trigger alert evaluation for ALL orchards in the system
+    
+    **Admin/Testing Use Only**
+    
+    Checks weather forecasts for all orchards and generates alerts.
+    In production, this runs automatically every 6 hours via scheduler.
+    """
+    try:
+        # Optional: Add admin check here
+        # if current_user.get("role") != "admin":
+        #     raise HTTPException(status_code=403, detail="Admin access required")
+        
+        results = await alert_service.evaluate_all_orchards()
+        
+        return {
+            "message": "Alert evaluation completed for all orchards",
+            "results": results
+        }
+    
+    except Exception as e:
+        logger.error(f"Error evaluating all orchards: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to evaluate alerts: {str(e)}"
         )
