@@ -46,7 +46,7 @@ class TestSignupUser:
                 email=test_user_data["email"],
                 password=test_user_data["password"],
                 full_name=test_user_data["full_name"],
-                role=UserRole.FARMER
+                role=UserRole.farmer
             )
             
             result = signup_user(user_signup)
@@ -68,7 +68,7 @@ class TestSignupUser:
                 email=test_user_data["email"],
                 password=test_user_data["password"],
                 full_name=test_user_data["full_name"],
-                role=UserRole.FARMER
+                role=UserRole.farmer
             )
             
             with pytest.raises(HTTPException) as exc_info:
@@ -86,7 +86,7 @@ class TestSignupUser:
                 email=test_user_data["email"],
                 password=None,
                 full_name=test_user_data["full_name"],
-                role=UserRole.FARMER
+                role=UserRole.farmer
             )
             
             with pytest.raises(HTTPException) as exc_info:
@@ -105,7 +105,7 @@ class TestSignupUser:
                 email=test_user_data["email"],
                 password=test_user_data["password"],
                 full_name=test_user_data["full_name"],
-                role=UserRole.FARMER
+                role=UserRole.farmer
             )
             
             with pytest.raises(HTTPException) as exc_info:

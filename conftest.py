@@ -33,18 +33,17 @@ def client() -> Generator[TestClient, None, None]:
     Synchronous test client for FastAPI application.
     Use for most API endpoint tests.
     """
-    with TestClient(app) as c:
-        yield c
+    return TestClient(app)
 
 
 @pytest.fixture
-async def async_client() -> AsyncGenerator[AsyncClient, None]:
+def async_client() -> AsyncClient:
     """
     Async test client for FastAPI application.
     Use for testing async endpoints and dependencies.
     """
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        yield ac
+    from httpx import ASGITransport
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
 # ============================================================================
@@ -252,13 +251,14 @@ def mock_upload_file():
     """Mock UploadFile for testing file uploads."""
     from io import BytesIO
     from fastapi import UploadFile
+    from unittest.mock import PropertyMock
     
     file_content = b"fake image content"
-    file = UploadFile(
-        filename="test_image.jpg",
-        file=BytesIO(file_content)
-    )
-    file.content_type = "image/jpeg"
+    # Create UploadFile without setting content_type in constructor
+    file = UploadFile(filename="test_image.jpg", file=BytesIO(file_content))
+    # Use PropertyMock to set read-only content_type attribute
+    type(file).content_type = PropertyMock(return_value="image/jpeg")
+    file.size = len(file_content)
     return file
 
 
