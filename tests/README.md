@@ -218,29 +218,6 @@ def test_api_endpoint(client, auth_headers):
     assert "expected_key" in data
 ```
 
-### Testing Async Functions
-
-```python
-@pytest.mark.asyncio
-async def test_async_function():
-    """Test async function"""
-    result = await async_function()
-    assert result is not None
-```
-
-### Mocking Dependencies
-
-```python
-def test_with_mocked_dependency():
-    """Test with mocked external dependency"""
-    with patch('module.dependency') as mock_dep:
-        mock_dep.return_value = {"data": "value"}
-        
-        result = function_using_dependency()
-        
-        assert result is not None
-        mock_dep.assert_called_once()
-```
 
 ## 🎯 Best Practices
 

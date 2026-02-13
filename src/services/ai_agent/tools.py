@@ -816,31 +816,42 @@ class AgentTools:
         Returns:
             Search results from Tavily
         """
-        results = await self.tavily.search(query, max_results=5)
-        
-        if results:
+        try:
+            results = await self.tavily.search(query, max_results=5)
+            
+            if results:
+                return {
+                    "query": query,
+                    "results": [
+                        {
+                            "title": r.get("title"),
+                            "url": r.get("url"),
+                            "content": r.get("content", "")[:500],  # Limit content length
+                            "score": r.get("score")
+                        }
+                        for r in results
+                    ],
+                    "count": len(results),
+                    "found": True
+                }
+            
             return {
                 "query": query,
-                "results": [
-                    {
-                        "title": r.get("title"),
-                        "url": r.get("url"),
-                        "content": r.get("content", "")[:500],  # Limit content length
-                        "score": r.get("score")
-                    }
-                    for r in results
-                ],
-                "count": len(results),
-                "found": True
+                "results": [],
+                "count": 0,
+                "found": False,
+                "message": "No search results found. Try rephrasing your query."
             }
-        
-        return {
-            "query": query,
-            "results": [],
-            "count": 0,
-            "found": False,
-            "message": "No search results found. Try rephrasing your query."
-        }
+        except Exception as e:
+            logger.error(f"Web search error: {str(e)}")
+            return {
+                "query": query,
+                "results": [],
+                "count": 0,
+                "found": False,
+                "error": True,
+                "message": f"Search failed: {str(e)}"
+            }
     
     async def get_weather_risk_assessment(self, orchard_id: str) -> Dict[str, Any]:
         """

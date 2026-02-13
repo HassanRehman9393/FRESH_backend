@@ -54,7 +54,7 @@ Be concise but thorough. Prioritize safety and compliance in all recommendations
         
         # Initialize the new genai client
         self.client = genai.Client(api_key=settings.gemini_api_key)
-        self.model_name = "gemini-2.0-flash"
+        self.model_name = "gemini-2.5-flash"
         
         logger.info("Gemini client initialized successfully")
     
@@ -130,14 +130,14 @@ Be concise but thorough. Prioritize safety and compliance in all recommendations
             contents = []
             for msg in messages:
                 role = "user" if msg["role"] == "user" else "model"
-                contents.append(types.Content(role=role, parts=[types.Part.from_text(msg["content"])]))
+                contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
             
             # Add context if provided
             if context and contents:
                 last_content = contents[-1].parts[0].text
                 contents[-1] = types.Content(
                     role=contents[-1].role,
-                    parts=[types.Part.from_text(f"Context: {context}\n\nUser Query: {last_content}")]
+                    parts=[types.Part(text=f"Context: {context}\n\nUser Query: {last_content}")]
                 )
             
             # Generate response with tools using the new SDK
@@ -216,8 +216,8 @@ Be concise but thorough. Prioritize safety and compliance in all recommendations
                 contents = []
                 for msg in conversation_history:
                     role = "user" if msg["role"] == "user" else "model"
-                    contents.append(types.Content(role=role, parts=[types.Part.from_text(msg["content"])]))
-                contents.append(types.Content(role="user", parts=[types.Part.from_text(full_prompt)]))
+                    contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
+                contents.append(types.Content(role="user", parts=[types.Part(text=full_prompt)]))
                 
                 response = self.client.models.generate_content(
                     model=self.model_name,
