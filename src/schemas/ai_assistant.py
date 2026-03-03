@@ -28,16 +28,50 @@ class ChatMessage(BaseModel):
         }
 
 
+class PageContext(BaseModel):
+    """Schema for page context to make AI responses more relevant."""
+    page: str = Field(..., description="Current page name (e.g., 'detection', 'orchard_detail')")
+    orchard_id: Optional[str] = Field(None, description="Currently selected orchard ID")
+    orchard_name: Optional[str] = Field(None, description="Currently selected orchard name")
+    path: str = Field(..., description="Current page path")
+    timestamp: str = Field(..., description="Context timestamp")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "page": "detection",
+                "orchard_id": "123e4567-e89b-12d3-a456-426614174000",
+                "orchard_name": "Mango Farm",
+                "path": "/dashboard/detection",
+                "timestamp": "2024-01-15T10:30:00Z"
+            }
+        }
+
+
 class ChatRequest(BaseModel):
     """Schema for chat request from client."""
     message: str = Field(..., min_length=1, max_length=4000, description="User's message")
     conversation_id: Optional[UUID] = Field(None, description="Existing conversation ID to continue")
+    page_context: Optional[PageContext] = Field(None, description="Current page context for better responses")
+    conversation_history: Optional[List[ChatMessage]] = Field(
+        None, 
+        max_items=10,
+        description="Recent conversation history (max 10 messages)"
+    )
     
     class Config:
         json_schema_extra = {
             "example": {
                 "message": "What diseases affect mangoes and how can I prevent them?",
-                "conversation_id": None
+                "conversation_id": None,
+                "page_context": {
+                    "page": "detection",
+                    "orchard_id": "123e4567-e89b-12d3-a456-426614174000",
+                    "orchard_name": "Mango Farm",
+                    "path": "/dashboard/detection",
+                    "timestamp": "2024-01-15T10:30:00Z"
+                },
+                "conversation_history": []
             }
         }
 

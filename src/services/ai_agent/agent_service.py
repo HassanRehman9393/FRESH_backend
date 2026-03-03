@@ -48,7 +48,8 @@ class AIAgentService:
         self,
         user_id: str,
         message: str,
-        conversation_id: str = None
+        conversation_id: str = None,
+        page_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Main entry point - processes user message through the agent pipeline.
@@ -66,6 +67,7 @@ class AIAgentService:
             user_id: User ID making the request
             message: User's message
             conversation_id: Optional existing conversation ID
+            page_context: Optional page context for context-aware responses
             
         Returns:
             ChatResponse with response, conversation_id, and metadata
@@ -83,7 +85,14 @@ class AIAgentService:
             # Step 2: Load conversation history
             history = await self._load_conversation_history(conv_id)
             
-            # Step 3: Add user message to history
+            # Step 3: Inject page context into system message if provided
+            if page_context:
+                context_message = self._build_context_message(page_context)
+                if context_message:
+                    # Insert context at beginning of conversation
+                    history.insert(0, {"role": "system", "content": context_message})
+            
+            # Step 4: Add user message to history
             history.append({"role": "user", "content": message})
             
             # Step 4: Generate response with tools
@@ -229,6 +238,51 @@ class AIAgentService:
             logger.warning(f"Could not load conversation history: {e}")
         
         return []
+    
+    def _build_context_message(self, page_context: Dict[str, Any]) -> Optional[str]:
+        """
+        Build a system message from page context to make AI responses more relevant.
+        
+        Args:
+            page_context: Current page context with page, orchard, path, etc.
+            
+        Returns:
+            System message string or None
+        """
+        if not page_context:
+            return None
+        
+        page = page_context.get("page", "unknown")
+        orchard_name = page_context.get("orchard_name")
+        orchard_id = page_context.get("orchard_id")
+        
+        context_parts = ["CURRENT CONTEXT:"]
+        
+        # Page-specific context
+        if page == "detection":
+            context_parts.append("The user is on the Detection page, analyzing fruit images.")
+            context_parts.append("Provide advice about detection accuracy, image quality, and next steps.")
+        elif page == "orchard_detail":
+            context_parts.append(f"The user is viewing the '{orchard_name}' orchard detail page.")
+            context_parts.append("Provide specific insights about this orchard's health, recent detections, and recommended actions.")
+        elif page == "disease":
+            context_parts.append("The user is on the Disease Analysis page.")
+            context_parts.append("Focus on disease identification, treatment options, and prevention strategies.")
+        elif page == "weather":
+            context_parts.append("The user is viewing weather and risk information.")
+            context_parts.append("Provide insights about weather impacts on fruit health and optimal timing for activities.")
+        elif page == "home" or page == "dashboard":
+            context_parts.append("The user is on the main dashboard.")
+            context_parts.append("Provide a high-level overview and suggest priority actions.")
+        
+        # Orchard context
+        if orchard_name and orchard_id:
+            context_parts.append(f"Selected Orchard: {orchard_name} (ID: {orchard_id})")
+            context_parts.append("When relevant, fetch data specific to this orchard using available tools.")
+        
+        context_parts.append("\\nUse this context to provide targeted, actionable responses.")
+        
+        return "\\n".join(context_parts)
     
     async def _save_message(
         self,

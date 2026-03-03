@@ -48,6 +48,11 @@ async def chat_with_assistant(
     - Explain export requirements for different countries
     - Search the web for current agricultural news and regulations
     
+    Supports context-aware responses based on:
+    - Current page (detection, orchard detail, disease analysis)
+    - Selected orchard
+    - Conversation history
+    
     **Example queries:**
     - "What is anthracnose and how do I treat it?"
     - "Is Mancozeb safe for exporting mangoes to EU?"
@@ -57,10 +62,22 @@ async def chat_with_assistant(
     try:
         service = AIAgentService(user_id=current_user["user_id"])
         
+        # Build page context for AI
+        page_context = None
+        if request.page_context:
+            page_context = {
+                "page": request.page_context.page,
+                "orchard_id": request.page_context.orchard_id,
+                "orchard_name": request.page_context.orchard_name,
+                "path": request.page_context.path,
+                "timestamp": request.page_context.timestamp
+            }
+        
         result = await service.process_message(
             user_id=current_user["user_id"],
             message=request.message,
-            conversation_id=str(request.conversation_id) if request.conversation_id else None
+            conversation_id=str(request.conversation_id) if request.conversation_id else None,
+            page_context=page_context
         )
         
         return ChatResponse(
