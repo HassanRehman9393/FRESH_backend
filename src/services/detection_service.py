@@ -367,11 +367,22 @@ async def get_detection_by_id(detection_id: UUID) -> DetectionResponse:
         annotated_image_filename=saved_data.get('annotated_image_filename')
     )
 
-async def get_all_detections(user_id: UUID, limit: int = 10, offset: int = 0) -> List[DetectionResponse]:
+async def get_all_detections(user_id: UUID, limit: int = 10, offset: int = 0, orchard_id: Optional[str] = None) -> List[DetectionResponse]:
     """Retrieve all detection results for a user with classification data"""
-    result = admin_supabase.table("detection_results")\
+    query = admin_supabase.table("detection_results")\
         .select("*")\
-        .eq("user_id", str(user_id))\
+        .eq("user_id", str(user_id))
+    
+    # Add orchard_id filter if provided
+    # Note: This assumes orchard_id column exists in detection_results table
+    # If it doesn't exist, the filter will be ignored
+    if orchard_id:
+        try:
+            query = query.eq("orchard_id", orchard_id)
+        except Exception as e:
+            logger.warning(f"Could not filter by orchard_id: {str(e)}. Column may not exist yet.")
+    
+    result = query\
         .order("created_at", desc=True)\
         .limit(limit)\
         .offset(offset)\

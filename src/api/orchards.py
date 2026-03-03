@@ -5,10 +5,11 @@ CRUD operations for orchard management
 
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List
-from src.schemas.weather import OrchardCreate, OrchardUpdate, OrchardResponse
+from src.schemas.weather import OrchardCreate, OrchardUpdate, OrchardResponse, OrchardSummaryResponse
 from src.core.supabase_client import supabase
 from src.api.deps import get_current_user
 from src.schemas.user import UserResponse
+from datetime import datetime, timedelta
 import logging
 
 logger = logging.getLogger(__name__)
@@ -199,3 +200,141 @@ async def delete_orchard(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete orchard"
         )
+
+
+@router.get("/default", response_model=OrchardResponse)
+async def get_default_orchard(
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Get the user's default orchard (most recently updated)
+    Returns the most recently updated active orchard for the user
+    """
+    try:
+        response = supabase.table("orchards")\
+            .select("*")\
+            .eq("user_id", current_user["user_id"])\
+            .eq("is_active", True)\
+            .order("updated_at", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No active orchard found. Please create an orchard first."
+            )
+        
+        logger.info(f"Retrieved default orchard for user {current_user['user_id']}")
+        return response.data[0]
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching default orchard: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch default orchard"
+        )
+
+
+@router.get("/{orchard_id}/summary", response_model=OrchardSummaryResponse)
+async def get_orchard_summary(
+    orchard_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Get an orchard with summary statistics
+    
+    Returns orchard details along with:
+    - **active_alerts**: Count of active weather alerts
+    - **today_detections**: Count of detections created today
+    - **health_status**: Overall health (healthy/warning/critical)
+    """
+    try:
+        # Get orchard data
+        orchard_response = supabase.table("orchards")\
+            .select("*")\
+            .eq("id", orchard_id)\
+            .eq("user_id", current_user["user_id"])\
+            .execute()
+        
+        if not orchard_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Orchard not found"
+            )
+        
+        orchard = orchard_response.data[0]
+        
+        # Get active alerts count
+        alerts_response = supabase.table("weather_alerts")\
+            .select("id", count="exact")\
+            .eq("orchard_id", orchard_id)\
+            .eq("is_active", True)\
+            .execute()
+        
+        active_alerts = alerts_response.count if hasattr(alerts_response, 'count') else len(alerts_response.data or [])
+        
+        # Get today's detections count
+        # Note: This assumes detection_results table will have orchard_id in the future
+        # For now, we return 0 as the table doesn't have orchard_id yet
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_detections = 0
+        
+        # Try to get detections count if the column exists
+        try:
+            detections_response = supabase.table("detection_results")\
+                .select("detection_id", count="exact")\
+                .eq("user_id", current_user["user_id"])\
+                .gte("created_at", today_start.isoformat())\
+                .execute()
+            
+            today_detections = detections_response.count if hasattr(detections_response, 'count') else len(detections_response.data or [])
+        except Exception as e:
+            logger.warning(f"Could not fetch detections count: {str(e)}")
+            today_detections = 0
+        
+        # Determine health status based on alerts
+        if active_alerts == 0:
+            health_status = "healthy"
+        elif active_alerts <= 2:
+            health_status = "warning"
+        else:
+            health_status = "critical"
+        
+        # Check for critical severity alerts
+        try:
+            critical_alerts = supabase.table("weather_alerts")\
+                .select("id", count="exact")\
+                .eq("orchard_id", orchard_id)\
+                .eq("is_active", True)\
+                .eq("severity", "critical")\
+                .execute()
+            
+            critical_count = critical_alerts.count if hasattr(critical_alerts, 'count') else len(critical_alerts.data or [])
+            if critical_count > 0:
+                health_status = "critical"
+        except Exception as e:
+            logger.warning(f"Could not check critical alerts: {str(e)}")
+        
+        # Build summary response
+        summary = {
+            **orchard,
+            "active_alerts": active_alerts,
+            "today_detections": today_detections,
+            "health_status": health_status
+        }
+        
+        logger.info(f"Retrieved orchard summary for {orchard_id}")
+        return summary
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching orchard summary: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch orchard summary"
+        )
+

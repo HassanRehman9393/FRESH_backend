@@ -39,15 +39,22 @@ async def batch_detect_fruits(
 async def get_detection_results(
     limit: int = Query(default=10, le=100),
     offset: int = Query(default=0, ge=0),
+    orchard_id: Optional[str] = Query(None, description="Filter by orchard ID"),
     current_user: dict = Depends(get_current_user)
 ):
     """
     Retrieve all detection results for the authenticated user.
     Supports pagination with limit and offset parameters.
+    Optionally filter by orchard_id.
     Requires authentication.
     """
     try:
-        return await get_all_detections(UUID(current_user["user_id"]), limit, offset)
+        return await get_all_detections(
+            UUID(current_user["user_id"]), 
+            limit, 
+            offset,
+            orchard_id=orchard_id
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

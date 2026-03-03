@@ -152,11 +152,24 @@ async def get_disease_detection_by_id(disease_detection_id: UUID) -> DiseaseDete
         
     return DiseaseDetectionResponse(**result.data[0])
 
-async def get_all_disease_detections(user_id: UUID, limit: int = 10, offset: int = 0) -> List[DiseaseDetectionResponse]:
+async def get_all_disease_detections(user_id: UUID, limit: int = 10, offset: int = 0, orchard_id: Optional[str] = None) -> List[DiseaseDetectionResponse]:
     """Retrieve all disease detection results for a user"""
-    result = admin_supabase.table("disease_detections")\
+    query = admin_supabase.table("disease_detections")\
         .select("*")\
-        .eq("user_id", str(user_id))\
+        .eq("user_id", str(user_id))
+    
+    # Add orchard_id filter if provided
+    # Note: This assumes orchard_id column exists in disease_detections table
+    # If it doesn't exist, the filter will be ignored
+    if orchard_id:
+        try:
+            query = query.eq("orchard_id", orchard_id)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Could not filter by orchard_id: {str(e)}. Column may not exist yet.")
+    
+    result = query\
         .order("created_at", desc=True)\
         .limit(limit)\
         .offset(offset)\

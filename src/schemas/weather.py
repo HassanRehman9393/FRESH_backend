@@ -111,6 +111,16 @@ class OrchardResponse(OrchardBase):
         from_attributes = True
 
 
+class OrchardSummaryResponse(OrchardResponse):
+    """Schema for orchard summary with quick stats"""
+    active_alerts: int = Field(default=0, description="Count of active alerts")
+    today_detections: int = Field(default=0, description="Count of today's detections")
+    health_status: str = Field(default="healthy", description="Overall health status: healthy, warning, or critical")
+
+    class Config:
+        from_attributes = True
+
+
 # ============================================================================
 # WEATHER DATA SCHEMAS
 # ============================================================================
