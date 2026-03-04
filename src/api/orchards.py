@@ -78,6 +78,41 @@ async def get_user_orchards(
         )
 
 
+@router.get("/default", response_model=OrchardResponse)
+async def get_default_orchard(
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Get the user's default orchard (most recently updated)
+    Returns the most recently updated active orchard for the user
+    """
+    try:
+        response = supabase.table("orchards")\
+            .select("*")\
+            .eq("user_id", current_user["user_id"])\
+            .eq("is_active", True)\
+            .order("updated_at", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No active orchards found"
+            )
+        
+        return response.data[0]
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching default orchard: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch default orchard"
+        )
+
+
 @router.get("/{orchard_id}", response_model=OrchardResponse)
 async def get_orchard(
     orchard_id: str,
