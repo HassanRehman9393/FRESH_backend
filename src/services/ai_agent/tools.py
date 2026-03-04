@@ -865,7 +865,7 @@ class AgentTools:
         """
         try:
             # Get orchard weather data
-            response = self.db.table("weather_risk_assessments").select(
+            response = self.db.table("weather_disease_risk").select(
                 "*, orchards(*)"
             ).eq("orchard_id", orchard_id).order(
                 "created_at", desc=True

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     debug: bool = False
     secret_key: str = "fallback-secret-key-change-in-production"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 43200  # 30 days
     
     # Redis Configuration
     redis_url: str = "redis://localhost:6379"
