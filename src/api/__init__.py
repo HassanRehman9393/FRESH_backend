@@ -6,3 +6,4 @@ from .orchards import router as orchards_router
 from .weather import router as weather_router
 from .alerts import router as alerts_router
 from .weather_risk import router as weather_risk_router
+from .analytics import router as analytics_router
