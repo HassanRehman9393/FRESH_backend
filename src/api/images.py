@@ -1,7 +1,8 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends, Query
 from typing import List, Optional, Any
 from src.services.image_service import upload_image_service, get_image_service, delete_image_service
-from src.schemas.image import ImageCreateResponse, ImageGetResponse
+from src.services.multispectral_upload_service import upload_multispectral_images
+from src.schemas.image import ImageCreateResponse, ImageGetResponse, MultispectralUploadResponse
 from src.api.deps import get_current_user
 
 router = APIRouter(prefix="/images", tags=["images"])
@@ -51,6 +52,38 @@ async def delete_image(
     success = await delete_image_service(image_id)
     if not success:
         raise HTTPException(status_code=404, detail="Image not found")
+
+@router.post("/multispectral/upload", response_model=MultispectralUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_multispectral(
+    files: List[UploadFile] = File(...),
+    orchard_id: Optional[str] = Query(default=None),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Upload multispectral images (6-band sets) and create detection-ready images.
+    
+    Automatically groups images by base filename (e.g., IMG_0197_1, IMG_0197_2, etc.).
+    Creates YOLO-ready detection images from Band 3 (Red) for fruit detection.
+    Incomplete sets are stored but not processed.
+    
+    Args:
+        files: List of multispectral band images (naming: BASENAME_BAND.ext)
+        orchard_id: Optional orchard association
+        
+    Returns:
+        MultispectralUploadResponse with detection-ready images and GPS data
+    """
+    try:
+        return await upload_multispectral_images(
+            user_id=current_user["user_id"],
+            files=files,
+            orchard_id=orchard_id
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Multispectral upload failed: {str(e)}"
+        )
 
 @router.get("/user/{user_id}", response_model=List[ImageGetResponse])
 async def get_images_by_user(user_id: str):

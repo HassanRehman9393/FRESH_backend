@@ -35,8 +35,9 @@ tavily-python>=0.3.0
 pytest
 pytest-asyncio
 
-# Image processing (for future use)
+# Image processing for multispectral feature
 Pillow
+numpy
 
 # Async support
 asyncpg
