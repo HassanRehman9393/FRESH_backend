@@ -198,7 +198,8 @@ from src.api import (
     weather_router,
     alerts_router,
     weather_risk_router,
-    ai_assistant_router
+    ai_assistant_router,
+    export_readiness_router
 )
 app.include_router(auth_router, prefix="/api")
 app.include_router(images_router, prefix="/api")
@@ -209,6 +210,7 @@ app.include_router(weather_router, prefix="/api")
 app.include_router(alerts_router, prefix="/api")
 app.include_router(weather_risk_router, prefix="/api")
 app.include_router(ai_assistant_router, prefix="/api")
+app.include_router(export_readiness_router, prefix="/api")
 
 if __name__ == "__main__":
     uvicorn.run(
