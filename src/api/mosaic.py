@@ -14,6 +14,39 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/mosaic", tags=["mosaic"])
 
 
+def _clean_url(url: str) -> str:
+    """Remove trailing ? from Supabase URLs"""
+    if url and url.endswith('?'):
+        return url[:-1]
+    return url
+
+
+def _get_preview_url(file_path: str, file_name: str, user_id: str) -> str:
+    """
+    Get the appropriate preview URL for an image file.
+    For TIFF files, attempt to return a JPG thumbnail path.
+    For other formats, return the original URL.
+    """
+    file_ext = file_name.lower().split('.')[-1] if file_name else ''
+    
+    # For TIFF files, try to return JPG thumbnail URL
+    if file_ext in ['tif', 'tiff']:
+        # Construct thumbnail path: same path with .jpg extension
+        thumb_path = file_path.rsplit('.', 1)[0] + '_thumb.jpg' if file_path else None
+        if thumb_path:
+            try:
+                thumb_url = admin_supabase.storage.from_('images').get_public_url(thumb_path)
+                thumb_url = _clean_url(thumb_url)
+                # Return thumbnail if it's a valid URL (will be checked when loading)
+                return thumb_url
+            except:
+                pass
+    
+    # Fallback to original URL
+    orig_url = admin_supabase.storage.from_('images').get_public_url(file_path) if file_path else None
+    return _clean_url(orig_url) if orig_url else None
+
+
 @router.get("/bounds")
 async def get_mosaic_bounds(current_user: dict = Depends(get_current_user)):
     """
@@ -170,6 +203,35 @@ async def get_mosaic_geojson(current_user: dict = Depends(get_current_user)):
             
             if lat is not None and lon is not None:
                 if -90 <= lat <= 90 and -180 <= lon <= 180:
+                    file_path = record.get("file_path")
+                    file_name = record.get("file_name", "")
+                    image_url = None
+                    
+                    # Generate clean public URL
+                    if file_path:
+                        if file_path.startswith("http"):
+                            image_url = _clean_url(file_path)
+                        else:
+                            try:
+                                raw_url = admin_supabase.storage.from_('images').get_public_url(file_path)
+                                image_url = _clean_url(raw_url)
+                            except Exception as e:
+                                logger.warning(f"Failed to generate URL from file_path {file_path}: {e}")
+                    
+                    # Fallback: try to generate from file_name
+                    if not image_url and file_name:
+                        try:
+                            storage_path = f"{current_user['user_id']}/{file_name}" if not file_name.startswith(current_user['user_id']) else file_name
+                            raw_url = admin_supabase.storage.from_('images').get_public_url(storage_path)
+                            image_url = _clean_url(raw_url)
+                        except Exception as e:
+                            logger.warning(f"Failed to generate URL from file_name {file_name}: {e}")
+                    
+                    # Skip images without valid URLs
+                    if not image_url:
+                        logger.warning(f"Image {record.get('id')} - no valid URL generated")
+                        continue
+                    
                     feature = {
                         "type": "Feature",
                         "geometry": {
@@ -178,13 +240,13 @@ async def get_mosaic_geojson(current_user: dict = Depends(get_current_user)):
                         },
                         "properties": {
                             "id": record.get("id"),
-                            "file_name": record.get("file_name"),
-                            "image_url": record.get("file_path"),
+                            "file_name": file_name,
+                            "image_url": image_url,
                             "latitude": lat,
                             "longitude": lon,
                             "altitude": metadata.get("gps_altitude"),
                             "timestamp": record.get("created_at"),
-                            "description": f"{record.get('file_name')} - GPS ({lat:.6f}, {lon:.6f})"
+                            "description": f"{file_name} - GPS ({lat:.6f}, {lon:.6f})"
                         }
                     }
                     features.append(feature)

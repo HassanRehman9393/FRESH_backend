@@ -36,8 +36,11 @@ async def upload_to_supabase_storage(file: UploadFile, file_name: str) -> str:
                 file_options={"content-type": file.content_type}
             )
         
-        # Get public URL
+        # Get public URL and clean up trailing query params
         public_url = admin_supabase.storage.from_('images').get_public_url(file_name)
+        # Remove trailing ? if present (Supabase SDK adds it sometimes)
+        if public_url and public_url.endswith('?'):
+            public_url = public_url[:-1]
         
         return public_url
     except Exception as e:
@@ -57,7 +60,8 @@ async def upload_image_service(user_id: str, file: UploadFile, metadata: Optiona
     
     # Get original file extension and ensure it's lowercase
     file_extension = os.path.splitext(file.filename)[1].lower()
-    storage_file_name = f"{image_id}{file_extension}"
+    # Store images under user-specific directory for security and organization
+    storage_file_name = f"{user_id}/{image_id}{file_extension}"
     print(f"Generated storage file name: {storage_file_name}")
     
     # Read file content for GPS extraction before upload
