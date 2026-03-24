@@ -85,6 +85,44 @@ async def upload_multispectral(
             detail=f"Multispectral upload failed: {str(e)}"
         )
 
+@router.get("/with-gps", response_model=List[ImageGetResponse])
+async def get_images_with_gps(
+    current_user: dict = Depends(get_current_user)
+):
+    """Get all images with GPS coordinates for map mosaic display.
+    
+    Returns all images (across all users or filtered by user) that have valid GPS data.
+    These will be displayed on the map as a mosaic.
+    """
+    try:
+        from src.core.supabase_client import admin_supabase
+        from src.schemas.image import ImageGetResponse
+        
+        # Get all images for this user that have GPS coordinates in metadata
+        result = admin_supabase.table("images").select("*").eq(
+            "user_id", current_user["user_id"]
+        ).execute()
+        
+        images_with_gps = []
+        for record in result.data:
+            metadata = record.get("metadata", {})
+            
+            # Check if image has valid GPS coordinates
+            lat = metadata.get("gps_latitude")
+            lon = metadata.get("gps_longitude")
+            
+            if lat is not None and lon is not None:
+                # Validate coordinates are realistic
+                if -90 <= lat <= 90 and -180 <= lon <= 180:
+                    images_with_gps.append(ImageGetResponse(**record))
+        
+        return images_with_gps
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to fetch images with GPS: {str(e)}"
+        )
+
 @router.get("/user/{user_id}", response_model=List[ImageGetResponse])
 async def get_images_by_user(user_id: str):
     """Get all images for a user by user_id."""

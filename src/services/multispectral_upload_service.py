@@ -165,11 +165,11 @@ async def upload_multispectral_images(
             for band_num, filename in mset.band_paths.items():
                 band_paths[band_num] = file_mapping[filename]
             
-            # Create detection-ready image from Band 3 (Red) - BEST for fruit detection
-            # Band 3 shows ripe fruit better than Band 2 (Green)
-            logger.info(f"Creating detection image from Band 3 (Red) for {base_name}...")
-            detection_array = MultispectralProcessor.create_detection_image(
-                band_paths, band_choice=3  # Band 3 (Red) - best for RIPE fruit detection
+            # Create ALIGNED RGB composite for TRUE color detection
+            # Uses AKAZE feature matching to align Band 1 (Blue) and Band 3 (Red) to Band 2 (Green)
+            logger.info(f"Creating aligned RGB composite for {base_name}...")
+            detection_array = MultispectralProcessor.create_aligned_rgb_composite(
+                band_paths, use_parallel=True
             )
             
             # Save detection image to temp file
@@ -188,25 +188,53 @@ async def upload_multispectral_images(
             temp_upload_detection = TempUploadFile(detection_content, detection_storage_name, "image/jpeg")
             detection_file_path = await upload_to_supabase_storage(temp_upload_detection, detection_storage_name)
             
-            # Extract GPS metadata from bands
-            gps_data = MultispectralProcessor.extract_gps_from_bands(band_paths)
+            # Extract GPS metadata with MAPVIEW logging
+            logger.info("\n" + "="*80)
+            logger.info("🗺️  [MAPVIEW] Extracting GPS for map mosaic...")
+            print("\n" + "="*80)
+            print("🗺️  [MAPVIEW] Extracting GPS for map mosaic...")
+            print(f"   Band paths: {band_paths}")
+            print("="*80)
             
-            # Create database record for detection image
+            try:
+                gps_data = MultispectralProcessor.extract_gps_from_bands(band_paths)
+                print(f"\n✅ GPS Extraction completed. Result: {gps_data}")
+            except Exception as gps_err:
+                print(f"\n❌ GPS Extraction failed with error: {gps_err}")
+                import traceback
+                traceback.print_exc()
+                gps_data = None
+            
+            if gps_data:
+                logger.info(f"✅ [MAPVIEW] GPS FOUND: ({gps_data['gps_latitude']:.6f}, {gps_data['gps_longitude']:.6f})")
+                print(f"✅ [MAPVIEW] GPS FOUND: ({gps_data['gps_latitude']:.6f}, {gps_data['gps_longitude']:.6f})")
+            else:
+                logger.error(f"❌ [MAPVIEW] NO GPS - image will NOT appear on map")
+                print(f"❌ [MAPVIEW] NO GPS - image will NOT appear on map")
+            logger.info("="*80)
+            print("="*80)
+            
+            # Store detection with GPS in metadata
+            logger.info(f"\n📊 [MAPVIEW-DB] Storing in database...")
+            logger.info(f"   Lat: {gps_data.get('gps_latitude') if gps_data else 'NULL'}")
+            logger.info(f"   Lon: {gps_data.get('gps_longitude') if gps_data else 'NULL'}")
+            logger.info(f"   Alt: {gps_data.get('gps_altitude') if gps_data else 'NULL'}")
+            
             detection_metadata = {
-                "original_filename": f"{base_name}_detection.jpg",
+                "original_filename": f"{base_name}_rgb_composite.jpg",
                 "storage_filename": detection_storage_name,
                 "content_type": "image/jpeg",
                 "is_multispectral_detection": True,
                 "multispectral_base_name": base_name,
-                "source_band": 3,
-                "source_band_name": "Red",
+                "composite_type": "aligned_rgb",
+                "alignment_method": "AKAZE_feature_matching",
                 "optimized_for": "YOLO_detection",
-                "description": "Single-band Red channel - optimized for fruit detection",
+                "description": "Aligned true RGB composite - Blue/Green/Red bands aligned with AKAZE",
                 "orchard_id": orchard_id,
                 "gps_data": gps_data,
-                "latitude": gps_data.get('latitude') if gps_data else None,
-                "longitude": gps_data.get('longitude') if gps_data else None,
-                "altitude": gps_data.get('altitude') if gps_data else None
+                "gps_latitude": gps_data.get('gps_latitude') if gps_data else None,
+                "gps_longitude": gps_data.get('gps_longitude') if gps_data else None,
+                "gps_altitude": gps_data.get('gps_altitude') if gps_data else None
             }
             
             detection_data = {
@@ -222,18 +250,26 @@ async def upload_multispectral_images(
             if result_detection.data:
                 detection_record = ImageCreateResponse(**result_detection.data[0])
                 composite_image_records.append(detection_record)  # Add to results
-                logger.info(f"✅ Created detection image for {base_name}")
+                logger.info(f"✅ [MAPVIEW-DB] Stored detection image in database")
+                logger.info(f"   ID: {detection_id}")
+                logger.info(f"   📦 [DEBUG] Stored metadata: {detection_metadata}")
+                logger.info(f"   📦 [DEBUG] Response metadata: {detection_record.metadata}")
+                if gps_data:
+                    logger.info(f"   🗺️  Map marker: ({gps_data['gps_latitude']:.6f}, {gps_data['gps_longitude']:.6f}) ✓")
+                else:
+                    logger.warning(f"   ❌ No GPS coordinate for map")
                 
                 # Add to complete sets info
                 complete_sets_info.append({
                     "base_name": base_name,
                     "detection_id": detection_id,
                     "has_gps": gps_data is not None,
-                    "latitude": gps_data.get('latitude') if gps_data else None,
-                    "longitude": gps_data.get('longitude') if gps_data else None,
-                    "altitude": gps_data.get('altitude') if gps_data else None,
+                    "gps_latitude": gps_data.get('gps_latitude') if gps_data else None,
+                    "gps_longitude": gps_data.get('gps_longitude') if gps_data else None,
+                    "gps_altitude": gps_data.get('gps_altitude') if gps_data else None,
                     "bands": sorted(band_paths.keys()),
-                    "description": "Detection-ready image from Band 3 (Red) - optimized for YOLO"
+                    "description": "Aligned RGB composite (AKAZE) - True color optimized for YOLO detection",
+                    "map_ready": gps_data is not None
                 })
         
         # Calculate statistics
