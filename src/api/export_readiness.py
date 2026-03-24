@@ -3,12 +3,15 @@ Export Readiness API Endpoints (Simplified)
 Routes for grading and compliance checking
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends
-from typing import List
+from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi.responses import StreamingResponse
+from typing import List, Optional
+import io
 from src.schemas.export_readiness import (
     FruitGradeRequest, FruitGradeResponse,
     ComplianceCheckRequest, ComplianceCheckResponse,
-    ExportStandardResponse, MarketInfo
+    ExportStandardResponse, MarketInfo,
+    ExportDocumentGenerateRequest, ExportDocumentResponse
 )
 from src.services.export_readiness_service import ExportReadinessService
 from src.api.deps import get_current_user
@@ -31,7 +34,7 @@ async def grade_fruit(
     """Grade a single fruit for export"""
     logger.info(f"Grading fruit: {request.fruit_type} for market {request.target_market}")
     try:
-        result = await ExportReadinessService.grade_fruit(request, current_user['id'])
+        result = await ExportReadinessService.grade_fruit(request)
         return result
     except HTTPException:
         raise
@@ -201,4 +204,80 @@ async def get_export_readiness_summary(
         
     except Exception as e:
         logger.error(f"Failed to get readiness summary: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# EXPORT DOCUMENTATION
+# ============================================================================
+
+@router.post("/documents/generate", response_model=ExportDocumentResponse)
+async def generate_export_document(
+    request: ExportDocumentGenerateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate a CSV export document for an orchard and market."""
+    try:
+        return await ExportReadinessService.generate_document(request, current_user["user_id"])
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate document: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/documents", response_model=List[ExportDocumentResponse])
+async def list_export_documents(
+    orchard_id: Optional[str] = Query(default=None, description="Filter by orchard ID"),
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: dict = Depends(get_current_user)
+):
+    """List generated export documents for the authenticated user."""
+    try:
+        return await ExportReadinessService.list_documents(
+            user_id=current_user["user_id"],
+            orchard_id=orchard_id,
+            limit=limit
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/documents/{document_id}/download")
+async def download_export_document(
+    document_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Download a generated export document as CSV."""
+    try:
+        file_name, content = await ExportReadinessService.get_document_content(document_id, current_user["user_id"])
+        csv_bytes = content.encode("utf-8")
+        return StreamingResponse(
+            io.BytesIO(csv_bytes),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{file_name}"'}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download document: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/documents/{document_id}")
+async def delete_export_document(
+    document_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete a generated export document."""
+    try:
+        await ExportReadinessService.delete_document(document_id, current_user["user_id"])
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete document: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

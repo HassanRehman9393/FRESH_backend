@@ -4,10 +4,13 @@ Business logic for fruit grading and compliance checking
 """
 
 from typing import List, Optional
+import io
+import csv
 from src.schemas.export_readiness import (
     FruitGradeRequest, FruitGradeResponse,
     ComplianceCheckRequest, ComplianceCheckResponse,
-    ComplianceIssue, ExportStandardResponse
+    ComplianceIssue, ExportStandardResponse,
+    ExportDocumentGenerateRequest, ExportDocumentResponse
 )
 from src.core.supabase_client import supabase
 from fastapi import HTTPException, status
@@ -69,7 +72,7 @@ class ExportReadinessService:
         return round(overall, 2), category
     
     @staticmethod
-    async def grade_fruit(request: FruitGradeRequest, user_id: str) -> FruitGradeResponse:
+    async def grade_fruit(request: FruitGradeRequest) -> FruitGradeResponse:
         """Grade a single fruit for export"""
         try:
             # Get export standard for target market
@@ -316,3 +319,158 @@ class ExportReadinessService:
                 status_code=500,
                 detail=f"Failed to fetch markets: {str(e)}"
             )
+
+    # ========================================================================
+    # EXPORT DOCUMENTATION
+    # ========================================================================
+
+    @staticmethod
+    async def generate_document(request: ExportDocumentGenerateRequest, user_id: str) -> ExportDocumentResponse:
+        """Generate export documentation CSV and persist metadata/content."""
+        try:
+            orchard_check = supabase.table('orchards').select('id').eq('id', request.orchard_id).eq('user_id', user_id).execute()
+            if not orchard_check.data:
+                raise HTTPException(status_code=403, detail='You do not have access to this orchard')
+
+            query = supabase.table('fruit_grades')\
+                .select('*')\
+                .eq('orchard_id', request.orchard_id)\
+                .eq('target_market', request.target_market)
+
+            if request.fruit_type:
+                query = query.eq('fruit_type', request.fruit_type)
+            if request.date_from:
+                query = query.gte('created_at', request.date_from.isoformat())
+            if request.date_to:
+                query = query.lte('created_at', f"{request.date_to.isoformat()}T23:59:59")
+
+            grades_result = query.order('created_at', desc=True).execute()
+            grades = grades_result.data or []
+
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+
+            writer.writerow(['Export Documentation'])
+            writer.writerow(['Document Type', request.document_type.value])
+            writer.writerow(['Target Market', request.target_market])
+            writer.writerow(['Orchard ID', request.orchard_id])
+            writer.writerow(['Fruit Type Filter', request.fruit_type or 'all'])
+            writer.writerow(['Generated At', datetime.utcnow().isoformat()])
+            writer.writerow([])
+
+            if not grades:
+                writer.writerow(['Notice'])
+                writer.writerow(['No graded fruits found for the selected filters.'])
+                writer.writerow([])
+
+            if request.include_summary:
+                premium = len([g for g in grades if g.get('grade_category') == 'premium'])
+                grade_a = len([g for g in grades if g.get('grade_category') == 'grade_a'])
+                grade_b = len([g for g in grades if g.get('grade_category') == 'grade_b'])
+                reject = len([g for g in grades if g.get('grade_category') == 'reject'])
+                compliant_count = premium + grade_a + grade_b
+                compliance_rate = (compliant_count / len(grades)) * 100 if grades else 0
+
+                writer.writerow(['Summary'])
+                writer.writerow(['Total Fruits', len(grades)])
+                writer.writerow(['Premium', premium])
+                writer.writerow(['Grade A', grade_a])
+                writer.writerow(['Grade B', grade_b])
+                writer.writerow(['Rejected', reject])
+                writer.writerow(['Compliance Rate (%)', round(compliance_rate, 1)])
+                writer.writerow([])
+
+            if request.include_grades:
+                writer.writerow(['Detailed Grades'])
+                writer.writerow(['Grade ID', 'Fruit Type', 'Size (mm)', 'Defect Count', 'Disease', 'Overall Grade', 'Category', 'Created At'])
+                for grade in grades:
+                    writer.writerow([
+                        grade.get('id'),
+                        grade.get('fruit_type'),
+                        grade.get('size_mm'),
+                        grade.get('defect_count'),
+                        grade.get('disease_detected') or 'none',
+                        grade.get('overall_grade'),
+                        grade.get('grade_category'),
+                        grade.get('created_at'),
+                    ])
+
+            content = csv_buffer.getvalue()
+            doc_id = str(uuid.uuid4())
+            safe_market = request.target_market.replace(' ', '_').lower()
+            file_name = f"{request.document_type.value}_{safe_market}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+
+            doc_data = {
+                'id': doc_id,
+                'orchard_id': request.orchard_id,
+                'user_id': user_id,
+                'document_type': request.document_type.value,
+                'target_market': request.target_market,
+                'fruit_type': request.fruit_type,
+                'file_name': file_name,
+                'file_size_bytes': len(content.encode('utf-8')),
+                'status': 'completed',
+                'date_from': request.date_from.isoformat() if request.date_from else None,
+                'date_to': request.date_to.isoformat() if request.date_to else None,
+                'generated_content': content,
+            }
+
+            result = supabase.table('export_documents').insert(doc_data).execute()
+            if not result.data:
+                raise HTTPException(status_code=500, detail='Failed to save generated document')
+
+            return ExportDocumentResponse(**result.data[0])
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'Failed to generate document: {str(e)}')
+
+    @staticmethod
+    async def list_documents(user_id: str, orchard_id: Optional[str] = None, limit: int = 50) -> List[ExportDocumentResponse]:
+        """List generated export documents for the authenticated user."""
+        try:
+            query = supabase.table('export_documents')\
+                .select('id, orchard_id, user_id, document_type, target_market, file_name, file_size_bytes, status, created_at')\
+                .eq('user_id', user_id)
+
+            if orchard_id:
+                query = query.eq('orchard_id', orchard_id)
+
+            result = query.order('created_at', desc=True).limit(limit).execute()
+            return [ExportDocumentResponse(**item) for item in (result.data or [])]
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'Failed to list documents: {str(e)}')
+
+    @staticmethod
+    async def get_document_content(document_id: str, user_id: str) -> tuple[str, str]:
+        """Get generated CSV content for download."""
+        try:
+            result = supabase.table('export_documents')\
+                .select('file_name, generated_content')\
+                .eq('id', document_id)\
+                .eq('user_id', user_id)\
+                .execute()
+
+            if not result.data:
+                raise HTTPException(status_code=404, detail='Document not found')
+
+            doc = result.data[0]
+            return doc['file_name'], doc['generated_content']
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'Failed to fetch document: {str(e)}')
+
+    @staticmethod
+    async def delete_document(document_id: str, user_id: str) -> None:
+        """Delete generated document metadata/content."""
+        try:
+            check = supabase.table('export_documents').select('id').eq('id', document_id).eq('user_id', user_id).execute()
+            if not check.data:
+                raise HTTPException(status_code=404, detail='Document not found')
+
+            supabase.table('export_documents').delete().eq('id', document_id).eq('user_id', user_id).execute()
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'Failed to delete document: {str(e)}')

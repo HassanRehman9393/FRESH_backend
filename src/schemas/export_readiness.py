@@ -5,7 +5,7 @@ Pydantic models for export grading and compliance checking
 
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum
 
 
@@ -32,6 +32,12 @@ class DiseaseTolerance(str, Enum):
     ZERO = "zero"
     LOW = "low"
     MEDIUM = "medium"
+
+
+class ExportDocumentType(str, Enum):
+    GRADE_REPORT = "grade_report"
+    COMPLIANCE_REPORT = "compliance_report"
+    READINESS_SUMMARY = "readiness_summary"
 
 
 # ============================================================================
@@ -118,5 +124,35 @@ class MarketInfo(BaseModel):
     country: str
     supported_fruits: List[str]
     
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# EXPORT DOCUMENTATION
+# ============================================================================
+
+class ExportDocumentGenerateRequest(BaseModel):
+    orchard_id: str
+    target_market: str
+    document_type: ExportDocumentType = ExportDocumentType.GRADE_REPORT
+    fruit_type: Optional[str] = None
+    include_grades: bool = True
+    include_summary: bool = True
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+
+
+class ExportDocumentResponse(BaseModel):
+    id: str
+    orchard_id: str
+    user_id: str
+    document_type: str
+    target_market: str
+    file_name: str
+    file_size_bytes: int
+    status: str
+    created_at: datetime
+
     class Config:
         from_attributes = True

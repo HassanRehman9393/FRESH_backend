@@ -4,11 +4,19 @@ Gemini LLM Client with Function Calling Support
 This module provides integration with Google's Gemini API for generating
 responses with tool/function calling capabilities.
 
-Uses the new google-genai SDK.
+Uses the google-generativeai SDK.
 """
 
-from google import genai
-from google.genai import types
+try:
+    import google.generativeai as genai
+    from google.generativeai import types
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+    genai = None
+    types = None
+    print("⚠️  Warning: google-generativeai not available. AI Assistant features will be disabled.")
+
 from typing import List, Dict, Any, Optional
 import json
 import logging
@@ -46,6 +54,12 @@ Be concise but thorough. Prioritize safety and compliance in all recommendations
         """Initialize the Gemini client with API configuration."""
         settings = get_settings()
         
+        if not GENAI_AVAILABLE:
+            logger.warning("google-generativeai not available - AI Assistant will not function")
+            self.client = None
+            self.model_name = None
+            return
+        
         if not settings.gemini_api_key:
             logger.warning("GEMINI_API_KEY not configured - AI Assistant will not function")
             self.client = None
@@ -58,7 +72,7 @@ Be concise but thorough. Prioritize safety and compliance in all recommendations
         
         logger.info("Gemini client initialized successfully")
     
-    def _convert_tools_to_genai_format(self, tools: List[Dict[str, Any]]) -> List[types.Tool]:
+    def _convert_tools_to_genai_format(self, tools: List[Dict[str, Any]]):
         """
         Convert tool definitions to google-genai function calling format.
         
@@ -68,6 +82,9 @@ Be concise but thorough. Prioritize safety and compliance in all recommendations
         Returns:
             List of Tool objects for google-genai
         """
+        if not GENAI_AVAILABLE or not types:
+            return []
+            
         function_declarations = []
         
         for tool in tools:
