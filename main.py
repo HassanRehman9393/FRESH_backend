@@ -198,6 +198,7 @@ from src.api import (
     weather_router,
     alerts_router,
     weather_risk_router,
+    analytics_router
     ai_assistant_router,
     export_readiness_router
 )
@@ -209,6 +210,7 @@ app.include_router(orchards_router, prefix="/api")
 app.include_router(weather_router, prefix="/api")
 app.include_router(alerts_router, prefix="/api")
 app.include_router(weather_risk_router, prefix="/api")
+app.include_router(analytics_router, prefix="/api")
 app.include_router(ai_assistant_router, prefix="/api")
 app.include_router(export_readiness_router, prefix="/api")
 
