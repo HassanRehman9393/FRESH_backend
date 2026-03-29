@@ -36,8 +36,13 @@ tavily-python>=0.3.0
 pytest
 pytest-asyncio
 
-# Image processing (for future use)
+# Image processing for multispectral feature
 Pillow
+numpy
+rasterio>=1.4.0
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+exifread>=3.0.0
 
 # Async support
 asyncpg

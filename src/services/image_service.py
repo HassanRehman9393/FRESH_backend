@@ -1,5 +1,6 @@
 from src.core.supabase_client import supabase, admin_supabase
 from src.schemas.image import ImageCreateResponse, ImageGetResponse
+from src.services.gps_extractor_service import GPSExtractorService
 from uuid import uuid4
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -7,6 +8,9 @@ import os
 from fastapi import UploadFile
 import aiofiles
 import tempfile
+import logging
+
+logger = logging.getLogger(__name__)
 
 async def upload_to_supabase_storage(file: UploadFile, file_name: str) -> str:
     """Upload file to Supabase storage and return the public URL"""
@@ -32,8 +36,11 @@ async def upload_to_supabase_storage(file: UploadFile, file_name: str) -> str:
                 file_options={"content-type": file.content_type}
             )
         
-        # Get public URL
+        # Get public URL and clean up trailing query params
         public_url = admin_supabase.storage.from_('images').get_public_url(file_name)
+        # Remove trailing ? if present (Supabase SDK adds it sometimes)
+        if public_url and public_url.endswith('?'):
+            public_url = public_url[:-1]
         
         return public_url
     except Exception as e:
@@ -53,10 +60,20 @@ async def upload_image_service(user_id: str, file: UploadFile, metadata: Optiona
     
     # Get original file extension and ensure it's lowercase
     file_extension = os.path.splitext(file.filename)[1].lower()
-    storage_file_name = f"{image_id}{file_extension}"
+    # Store images under user-specific directory for security and organization
+    storage_file_name = f"{user_id}/{image_id}{file_extension}"
     print(f"Generated storage file name: {storage_file_name}")
     
+    # Read file content for GPS extraction before upload
+    await file.seek(0)
+    file_bytes = await file.read()
+    
+    # Extract GPS data from image EXIF
+    print(f"🔍 Extracting GPS data from {file.filename}...")
+    gps_data = GPSExtractorService.extract_gps_from_exif(file_bytes, file.filename)
+    
     # Upload to storage and get public URL
+    await file.seek(0)  # Reset file pointer after reading
     file_path = await upload_to_supabase_storage(file, storage_file_name)
     print(f"File uploaded to storage at: {file_path}")
     
@@ -71,11 +88,19 @@ async def upload_image_service(user_id: str, file: UploadFile, metadata: Optiona
     # Add file information to metadata
     if metadata is None:
         metadata = {}
+    
     metadata.update({
         "original_filename": file.filename,
         "storage_filename": storage_file_name,
         "content_type": file.content_type
     })
+    
+    # Add GPS data to metadata if available
+    if gps_data:
+        metadata.update(gps_data)
+        print(f"✅ GPS data added to metadata: {gps_data}")
+    else:
+        print(f"⚠️ No GPS data found in image")
     
     # Create database record using admin client for now (we'll add RLS policies later)
     data = {
