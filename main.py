@@ -198,7 +198,8 @@ from src.api import (
     weather_router,
     alerts_router,
     weather_risk_router,
-    ai_assistant_router
+    ai_assistant_router,
+    yield_router
 )
 from src.api.mosaic import router as mosaic_router
 app.include_router(auth_router, prefix="/api")
@@ -210,6 +211,7 @@ app.include_router(weather_router, prefix="/api")
 app.include_router(alerts_router, prefix="/api")
 app.include_router(weather_risk_router, prefix="/api")
 app.include_router(ai_assistant_router, prefix="/api")
+app.include_router(yield_router, prefix="/api")
 app.include_router(mosaic_router, prefix="/api")
 
 if __name__ == "__main__":
