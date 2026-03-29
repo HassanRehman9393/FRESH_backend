@@ -198,7 +198,7 @@ from src.api import (
     weather_router,
     alerts_router,
     weather_risk_router,
-    analytics_router
+    analytics_router,
     ai_assistant_router,
     export_readiness_router
 )
