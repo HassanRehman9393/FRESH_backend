@@ -276,6 +276,57 @@ async def delete_conversation(
 
 # Direct tool endpoints for specific queries without chat context
 
+@router.get(
+    "/detection-summary",
+    summary="Get Supabase-backed detection summary"
+)
+async def get_detection_summary(
+    period: str = "this_month",
+    orchard_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get detection totals and trends for this month or up to last 6 months.
+    """
+    try:
+        service = AIAgentService(user_id=current_user["user_id"])
+        return await service.tools.get_detection_summary(
+            period=period,
+            orchard_id=orchard_id
+        )
+    except Exception as e:
+        logger.error(f"Detection summary error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get detection summary"
+        )
+
+
+@router.get(
+    "/orchard-weather/{orchard_id}",
+    summary="Get orchard weather and detection signals"
+)
+async def get_orchard_weather_summary(
+    orchard_id: str,
+    days: int = 3,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get orchard profile, current weather, short forecast, and this-month detection signals.
+    """
+    try:
+        service = AIAgentService(user_id=current_user["user_id"])
+        return await service.tools.get_orchard_weather(
+            orchard_id=orchard_id,
+            days=days
+        )
+    except Exception as e:
+        logger.error(f"Orchard weather summary error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get orchard weather summary"
+        )
+
 @router.post(
     "/mrl-check",
     response_model=MRLCheckResponse,
