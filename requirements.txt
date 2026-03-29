@@ -27,6 +27,11 @@ redis
 pydantic[email]
 pydantic-settings
 
+# AI Assistant - Gemini LLM, Groq, and Web Search
+google-genai>=1.0.0
+groq>=0.9.0
+tavily-python>=0.3.0
+
 # Testing
 pytest
 pytest-asyncio

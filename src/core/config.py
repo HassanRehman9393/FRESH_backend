@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     email_enabled: bool = Field(default=True, alias="EMAIL_ENABLED")
     email_send_alerts: bool = Field(default=True, alias="EMAIL_SEND_ALERTS")
     
+    # AI Assistant Configuration
+    groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
+    qdrant_url: str = Field(default="", alias="QDRANT_URL")
+    qdrant_api_key: str = Field(default="", alias="QDRANT_API_KEY")
+    
     # Application Info
     app_name: str = "FRESH Backend API"
     app_version: str = "1.0.0"
@@ -122,3 +128,8 @@ class Settings(BaseSettings):
 
 # Create settings instance
 settings = Settings()
+
+
+def get_settings() -> Settings:
+    """Get application settings instance."""
+    return settings
