@@ -2,7 +2,7 @@
 AI Agent Service - Main Orchestrator
 
 This module provides the main AI Agent service that orchestrates
-conversations, tool calling, and response generation using Gemini LLM.
+conversations, tool calling, and response generation using Groq LLM.
 """
 
 from typing import Dict, Any, Optional, List
@@ -12,7 +12,7 @@ import json
 import logging
 
 from src.core.supabase_client import admin_supabase
-from .gemini_client import GeminiClient
+from .groq_client import GroqClient
 from .tools import AgentTools
 from .tavily_client import TavilyClient
 
@@ -25,7 +25,7 @@ class AIAgentService:
     1. Receives user messages
     2. Determines intent and required tools
     3. Executes tools to gather information
-    4. Generates contextual responses using Gemini
+    4. Generates contextual responses using Groq
     5. Manages conversation history
     """
     
@@ -38,7 +38,7 @@ class AIAgentService:
         Args:
             user_id: Current user's ID for user-specific operations
         """
-        self.gemini = GeminiClient()
+        self.groq = GroqClient()
         self.tools = AgentTools(admin_supabase, user_id)
         self.tavily = TavilyClient()
         self.user_id = user_id
@@ -90,11 +90,85 @@ class AIAgentService:
             tools_used = []
             tool_results = []
             
-            # First pass - check if tools are needed
-            response = await self.gemini.generate_with_tools(
-                messages=history,
-                tools=AgentTools.TOOL_DEFINITIONS
-            )
+            # CRITICAL: Check if user is asking about their orchards or weather for orchards
+            # If so, FORCE the appropriate tool calls before generating response
+            message_lower = message.lower()
+            orchard_keywords = ["orchards", "my orchards", "registered orchards", "listed orchards", "farms", "my farms", "what orchards"]
+            weather_keywords = ["weather", "forecast", "temperature", "humidity", "rainfall", "wind"]
+            price_keywords = ["price", "cost", "rate", "how much", "expensive", "cheap", "rupee", "rs", "pkr", "usd", "dollar"]
+            supported_fruits = ["orange", "mango", "guava", "grapefruit"]
+            
+            is_orchard_query = any(keyword in message_lower for keyword in orchard_keywords)
+            is_weather_query = any(keyword in message_lower for keyword in weather_keywords)
+            is_price_query = any(keyword in message_lower for keyword in price_keywords) and any(fruit in message_lower for fruit in supported_fruits)
+            
+            # If weather query for orchards, fetch orchards first, then weather for each
+            if is_weather_query and is_orchard_query:
+                logger.info("Weather query for orchards detected - fetching orchards and weather")
+                # Get user's orchards
+                orchards_result = await self.tools.get_user_orchards()
+                if orchards_result.get("found") and orchards_result.get("orchards"):
+                    tool_results.append({
+                        "tool_name": "get_user_orchards",
+                        "success": True,
+                        "data": orchards_result
+                    })
+                    tools_used.append("get_user_orchards")
+                    
+                    # Get weather for each orchard
+                    for orchard in orchards_result.get("orchards", []):
+                        orchard_name = orchard.get("name")
+                        weather_result = await self.tools.get_weather_risk_assessment(orchard_name)
+                        if weather_result.get("found"):
+                            tool_results.append({
+                                "tool_name": "get_weather_risk_assessment",
+                                "success": True,
+                                "data": weather_result
+                            })
+                            tools_used.append("get_weather_risk_assessment")
+                else:
+                    tool_results.append({
+                        "tool_name": "get_user_orchards",
+                        "success": True,
+                        "data": orchards_result
+                    })
+                    tools_used.append("get_user_orchards")
+            elif is_orchard_query:
+                logger.info("Orchard query detected - fetching user orchards")
+                # Get user's orchards
+                orchards_result = await self.tools.get_user_orchards()
+                tool_results.append({
+                    "tool_name": "get_user_orchards",
+                    "success": True,
+                    "data": orchards_result
+                })
+                tools_used.append("get_user_orchards")
+            elif is_price_query:
+                logger.info("Price query detected - fetching fruit prices")
+                # Extract fruit name from message
+                fruit_name = None
+                for fruit in supported_fruits:
+                    if fruit in message_lower:
+                        fruit_name = fruit
+                        break
+                
+                if fruit_name:
+                    price_result = await self.tools.get_fruit_price(fruit_name)
+                    tool_results.append({
+                        "tool_name": "get_fruit_price",
+                        "success": True,
+                        "data": price_result
+                    })
+                    tools_used.append("get_fruit_price")
+            
+            # First pass - check if tools are needed (for non-orchard/weather/price queries)
+            if not tools_used:
+                response = await self.groq.generate_with_tools(
+                    messages=history,
+                    tools=AgentTools.TOOL_DEFINITIONS
+                )
+            else:
+                response = {"response": "", "tool_calls": []}
             
             # Step 5: Execute tools if requested (with iteration limit)
             iteration = 0
@@ -114,13 +188,22 @@ class AIAgentService:
                 
                 # Generate response with tool results
                 if tool_results:
-                    final_response = await self.gemini.generate_with_tool_results(
+                    final_response = await self.groq.generate_with_tool_results(
                         original_prompt=message,
                         tool_results=tool_results,
                         conversation_history=history[:-1]  # Exclude last user message
                     )
                     response["response"] = final_response
                     response["tool_calls"] = []  # Clear tool calls after processing
+            
+            # If we have tool results from orchard/weather detection, generate response with them
+            if tool_results and not response.get("response"):
+                final_response = await self.groq.generate_with_tool_results(
+                    original_prompt=message,
+                    tool_results=tool_results,
+                    conversation_history=history[:-1]  # Exclude last user message
+                )
+                response["response"] = final_response
             
             # Step 6: Save messages to conversation history
             assistant_response = response.get("response", "I apologize, but I couldn't generate a response.")

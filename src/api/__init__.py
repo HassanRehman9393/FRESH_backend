@@ -8,3 +8,6 @@ from .alerts import router as alerts_router
 from .weather_risk import router as weather_risk_router
 from .ai_assistant import router as ai_assistant_router
 from .yield_routes import router as yield_router
+from .analytics import router as analytics_router
+from .ai_assistant import router as ai_assistant_router
+from .export_readiness import router as export_readiness_router

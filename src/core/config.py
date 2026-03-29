@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     email_send_alerts: bool = Field(default=True, alias="EMAIL_SEND_ALERTS")
     
     # AI Assistant Configuration
-    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
     qdrant_api_key: str = Field(default="", alias="QDRANT_API_KEY")
