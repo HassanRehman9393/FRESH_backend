@@ -71,12 +71,20 @@ async def process_single_disease_detection(detection_id: UUID, user_id: UUID) ->
         # Get the first disease detection result
         first_disease = ml_result['disease_results'][0]
         
-        # Prepare database record
+        # Extract orchard_id from detection for strict orchard-level isolation
+        orchard_id = detection.orchard_id if hasattr(detection, 'orchard_id') else None
+        if not orchard_id:
+            logger.warning(f"⚠️ [Disease Service] Detection {detection_id} has no orchard_id - disease detection will not be orchard-linked")
+        else:
+            logger.info(f"🔐 [Disease Service] Detection linked to orchard={orchard_id} - disease detection will be stored with orchard isolation")
+        
+        # Prepare database record with orchard_id for isolation
         disease_record = {
             "disease_detection_id": str(uuid4()),
             "detection_id": str(detection_id),
             "user_id": str(user_id),
             "image_id": str(detection.image_id),
+            "orchard_id": orchard_id,  # DATABASE-LEVEL ISOLATION: Store orchard_id directly
             "disease_type": first_disease.get('disease_type'),
             "is_diseased": first_disease.get('is_diseased'),
             "disease_confidence": first_disease.get('confidence'),
@@ -84,6 +92,8 @@ async def process_single_disease_detection(detection_id: UUID, user_id: UUID) ->
             "probabilities": first_disease.get('probabilities'),
             "created_at": datetime.utcnow().isoformat()
         }
+        
+        logger.info(f"🔐 [Disease Service] DISEASE RECORD BEFORE INSERT: disease_detection_id={disease_record['disease_detection_id']} orchard_id={disease_record['orchard_id']} detection_id={disease_record['detection_id']}")
         
         logger.info(f"Saving disease detection result to database")
         
@@ -95,6 +105,8 @@ async def process_single_disease_detection(detection_id: UUID, user_id: UUID) ->
         
         # Create response object
         response_data = result.data[0]
+        
+        logger.info(f"🔐 [Disease Service] DISEASE RECORD AFTER INSERT: disease_detection_id={response_data.get('disease_detection_id')} stored_orchard_id={response_data.get('orchard_id')} detection_id={response_data.get('detection_id')}")
         
         return DiseaseDetectionResponse(**response_data)
         

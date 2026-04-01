@@ -112,7 +112,8 @@ def calculate_export_compliance(detection_data: Dict[str, Any]) -> ExportQuality
 async def get_quality_analytics(
     user_id: UUID,
     start_date: Optional[date] = None,
-    end_date: Optional[date] = None
+    end_date: Optional[date] = None,
+    orchard_id: Optional[UUID] = None,
 ) -> QualityAnalyticsResponse:
     """
     Generate fruit quality analytics for a user within a date range.
@@ -122,13 +123,15 @@ async def get_quality_analytics(
         logger.info(f"Generating quality analytics for user {user_id}")
         date_range = get_date_range(start_date, end_date)
         logger.info(f"Date range: {date_range}")
-        
+
         # Fetch detection results from detection_results table
         query = admin_supabase.table("detection_results") \
             .select("*") \
             .eq("user_id", str(user_id)) \
             .gte("created_at", f"{date_range['start']}T00:00:00") \
             .lte("created_at", f"{date_range['end']}T23:59:59")
+        if orchard_id:
+            query = query.eq("orchard_id", str(orchard_id))
         
         logger.info(f"Executing query for detection results")
         result = query.execute()
@@ -264,7 +267,8 @@ async def get_quality_analytics(
 async def get_quality_trends(
     user_id: UUID,
     start_date: Optional[date] = None,
-    end_date: Optional[date] = None
+    end_date: Optional[date] = None,
+    orchard_id: Optional[UUID] = None,
 ) -> QualityAnalyticsTrendResponse:
     """
     Generate quality trend analytics over time.
@@ -272,14 +276,16 @@ async def get_quality_trends(
     """
     try:
         date_range = get_date_range(start_date, end_date)
-        
+
         # Fetch detections from detection_results
         query = admin_supabase.table("detection_results") \
             .select("*") \
             .eq("user_id", str(user_id)) \
             .gte("created_at", f"{date_range['start']}T00:00:00") \
             .lte("created_at", f"{date_range['end']}T23:59:59")
-        
+        if orchard_id:
+            query = query.eq("orchard_id", str(orchard_id))
+
         result = query.execute()
         detections = result.data if result.data else []
         
@@ -350,7 +356,8 @@ async def get_quality_trends(
 async def get_disease_risk_analytics(
     user_id: UUID,
     start_date: Optional[date] = None,
-    end_date: Optional[date] = None
+    end_date: Optional[date] = None,
+    orchard_id: Optional[UUID] = None,
 ) -> DiseaseRiskAnalyticsResponse:
     """
     Generate disease risk analytics for a user within a date range.
@@ -358,13 +365,15 @@ async def get_disease_risk_analytics(
     """
     try:
         date_range = get_date_range(start_date, end_date)
-        
+
         # Fetch disease detections from disease_detections table
         query = admin_supabase.table("disease_detections") \
             .select("*") \
             .eq("user_id", str(user_id)) \
             .gte("created_at", f"{date_range['start']}T00:00:00") \
             .lte("created_at", f"{date_range['end']}T23:59:59")
+        if orchard_id:
+            query = query.eq("orchard_id", str(orchard_id))
         
         result = query.execute()
         disease_detections = result.data if result.data else []
@@ -471,7 +480,8 @@ async def get_disease_risk_analytics(
 async def get_disease_risk_trends(
     user_id: UUID,
     start_date: Optional[date] = None,
-    end_date: Optional[date] = None
+    end_date: Optional[date] = None,
+    orchard_id: Optional[UUID] = None,
 ) -> DiseaseRiskTrendResponse:
     """
     Generate disease risk trend analytics over time.
@@ -479,13 +489,15 @@ async def get_disease_risk_trends(
     """
     try:
         date_range = get_date_range(start_date, end_date)
-        
+
         # Fetch disease detections
         query = admin_supabase.table("disease_detections") \
             .select("*") \
             .eq("user_id", str(user_id)) \
             .gte("created_at", f"{date_range['start']}T00:00:00") \
             .lte("created_at", f"{date_range['end']}T23:59:59")
+        if orchard_id:
+            query = query.eq("orchard_id", str(orchard_id))
         
         result = query.execute()
         disease_detections = result.data if result.data else []
@@ -528,7 +540,8 @@ async def get_disease_risk_trends(
 async def get_yield_analytics(
     user_id: UUID,
     start_date: Optional[date] = None,
-    end_date: Optional[date] = None
+    end_date: Optional[date] = None,
+    orchard_id: Optional[UUID] = None,
 ) -> YieldAnalyticsResponse:
     """
     Generate yield analytics for a user within a date range.
@@ -536,13 +549,15 @@ async def get_yield_analytics(
     """
     try:
         date_range = get_date_range(start_date, end_date)
-        
+
         # Fetch detection results from detection_results table
         query = admin_supabase.table("detection_results") \
             .select("*") \
             .eq("user_id", str(user_id)) \
             .gte("created_at", f"{date_range['start']}T00:00:00") \
             .lte("created_at", f"{date_range['end']}T23:59:59")
+        if orchard_id:
+            query = query.eq("orchard_id", str(orchard_id))
         
         result = query.execute()
         detections = result.data if result.data else []
@@ -668,15 +683,16 @@ async def get_yield_analytics(
 async def get_yield_comparison(
     user_id: UUID,
     start_date: Optional[date] = None,
-    end_date: Optional[date] = None
+    end_date: Optional[date] = None,
+    orchard_id: Optional[UUID] = None,
 ) -> YieldComparisonResponse:
     """
     Compare yield between current period and previous period.
     """
     try:
         # Get current period analytics
-        current = await get_yield_analytics(user_id, start_date, end_date)
-        
+        current = await get_yield_analytics(user_id, start_date, end_date, orchard_id=orchard_id)
+
         # Calculate previous period dates
         if start_date and end_date:
             period_days = (end_date - start_date).days
@@ -686,10 +702,10 @@ async def get_yield_comparison(
             # Default 30 days
             prev_end = date.today() - timedelta(days=31)
             prev_start = prev_end - timedelta(days=30)
-        
+
         # Get previous period analytics
         try:
-            previous = await get_yield_analytics(user_id, prev_start, prev_end)
+            previous = await get_yield_analytics(user_id, prev_start, prev_end, orchard_id=orchard_id)
         except:
             previous = None
         
@@ -717,7 +733,8 @@ async def get_export_readiness(
     user_id: UUID,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    target_market: Optional[str] = None
+    target_market: Optional[str] = None,
+    orchard_id: Optional[UUID] = None,
 ) -> ExportReadinessResponse:
     """
     Generate export readiness report for a user within a date range.
@@ -725,16 +742,18 @@ async def get_export_readiness(
     """
     try:
         date_range = get_date_range(start_date, end_date)
-        
+
         logger.info(f"Generating export readiness report for user {user_id}")
         logger.info(f"Date range: {date_range}, Target market: {target_market}")
-        
+
         # Fetch detection results from detection_results table
         detections_query = admin_supabase.table("detection_results") \
             .select("*") \
             .eq("user_id", str(user_id)) \
             .gte("created_at", f"{date_range['start']}T00:00:00") \
             .lte("created_at", f"{date_range['end']}T23:59:59")
+        if orchard_id:
+            detections_query = detections_query.eq("orchard_id", str(orchard_id))
         
         detections_result = detections_query.execute()
         detections = detections_result.data if detections_result.data else []
@@ -915,19 +934,20 @@ async def get_export_readiness(
 async def get_analytics_summary(
     user_id: UUID,
     start_date: Optional[date] = None,
-    end_date: Optional[date] = None
+    end_date: Optional[date] = None,
+    orchard_id: Optional[UUID] = None,
 ) -> AnalyticsSummaryResponse:
     """
     Generate comprehensive analytics summary combining all metrics.
     """
     try:
         date_range = get_date_range(start_date, end_date)
-        
+
         # Get all analytics in parallel would be ideal, but for simplicity doing sequentially
-        quality = await get_quality_analytics(user_id, start_date, end_date)
-        disease = await get_disease_risk_analytics(user_id, start_date, end_date)
-        yield_data = await get_yield_analytics(user_id, start_date, end_date)
-        export = await get_export_readiness(user_id, start_date, end_date)
+        quality = await get_quality_analytics(user_id, start_date, end_date, orchard_id=orchard_id)
+        disease = await get_disease_risk_analytics(user_id, start_date, end_date, orchard_id=orchard_id)
+        yield_data = await get_yield_analytics(user_id, start_date, end_date, orchard_id=orchard_id)
+        export = await get_export_readiness(user_id, start_date, end_date, orchard_id=orchard_id)
         
         # Identify areas for improvement
         areas_for_improvement = []

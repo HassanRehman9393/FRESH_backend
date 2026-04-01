@@ -8,6 +8,7 @@ from src.services.ml_client import ml_client
 import base64
 import logging
 import re
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,15 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
         else:
             image_dict = image
         
-        logger.info(f"Processing image {image_id} for user {user_id}")
-        logger.info(f"Image file name: {image_dict['file_name']}")
+        logger.info(
+            f"📸 [Detection Service] Processing image | image_id={image_id} user_id={user_id}"
+        )
+        logger.info(
+            f"📸 [Detection Service] Image file name: {image_dict['file_name']}"
+        )
+        logger.info(
+            f"📸 [Detection Service] Full image metadata from DB: {image_dict.get('metadata', {})}"
+        )
         
         # Download image from Supabase storage using the stored filename
         bucket_name = "images"
@@ -137,6 +145,50 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
                 logger.error(f"Failed to process visualization: {str(viz_error)}")
                 # Don't fail the entire detection if visualization fails
         
+        # Extract orchard_id from image metadata for strict database-level isolation
+        metadata = image_dict.get('metadata', {})
+
+        # Handle case where metadata might be a JSON string instead of dict
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except Exception:
+                metadata = {}
+                logger.warning(f"⚠️ [Detection Service] Could not parse metadata JSON string for image {image_id}")
+
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        orchard_id = metadata.get('orchard_id')
+        if not orchard_id:
+            # Fallback: query images table directly in case model parsing dropped metadata
+            try:
+                image_metadata_response = admin_supabase.table("images").select("metadata").eq("id", str(image_id)).limit(1).execute()
+                if image_metadata_response.data:
+                    raw_metadata = image_metadata_response.data[0].get("metadata", {})
+                    if isinstance(raw_metadata, str):
+                        try:
+                            raw_metadata = json.loads(raw_metadata)
+                        except Exception:
+                            raw_metadata = {}
+                    if isinstance(raw_metadata, dict):
+                        orchard_id = raw_metadata.get("orchard_id")
+            except Exception as fallback_err:
+                logger.warning(f"⚠️ [Detection Service] Failed fallback orchard_id lookup for image {image_id}: {fallback_err}")
+
+        if not orchard_id:
+            raise Exception(
+                f"Image {image_id} is missing orchard_id in metadata; refusing to create detection_results with NULL orchard_id"
+            )
+
+        logger.info(
+            f"🔐 [Detection Service] Image linked to orchard={orchard_id} | image_id={image_id} - detections will be stored with orchard isolation"
+        )
+        
+        logger.info(
+            f"🔐 [Detection Service] EXTRACTED orchard_id | image_id={image_id} orchard_id={orchard_id} type={type(orchard_id)}"
+        )
+        
         # Save ALL detected fruits (not just the first one)
         detection_results = []
         
@@ -162,11 +214,12 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
             # Generate detection_id upfront to use across all tables
             detection_id = str(uuid4())
             
-            # 1. Save to detection_results table (fruit detection data)
+            # 1. Save to detection_results table (fruit detection data) WITH ORCHARD_ID FOR ISOLATION
             detection_record = {
                 "detection_id": detection_id,
                 "user_id": str(user_id),
                 "image_id": str(image_id),
+                "orchard_id": orchard_id,  # DATABASE-LEVEL ISOLATION: Store orchard_id directly
                 "fruit_type": fruit_detection.get('fruit_type'),
                 "confidence": fruit_detection.get('detection_confidence'),
                 "bounding_box": fruit_detection.get('bounding_box'),
@@ -178,6 +231,7 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
             logger.info(f"💾 [Detection Service] Saving detection result for {fruit_detection.get('fruit_type')} with confidence {fruit_detection.get('detection_confidence')}")
             logger.info(f"💾 [Detection Service] annotated_image_url in record: {annotated_url}")
             logger.info(f"💾 [Detection Service] annotated_image_filename in record: {annotated_filename}")
+            logger.info(f"🔐 [Detection Service] DETECTION RECORD BEFORE INSERT: detection_id={detection_record['detection_id']} orchard_id={detection_record['orchard_id']} user_id={detection_record['user_id']} image_id={detection_record['image_id']}")
             
             detection_result = admin_supabase.table("detection_results").insert(detection_record).execute()
             
@@ -186,12 +240,14 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
                 continue
             
             saved_detection = detection_result.data[0]
+            logger.info(f"🔐 [Detection Service] DETECTION RECORD AFTER INSERT: detection_id={saved_detection.get('detection_id')} stored_orchard_id={saved_detection.get('orchard_id')} from_db={saved_detection.get('orchard_id')}")
             bbox_data = saved_detection['bounding_box']
             
-            # 2. Save to classification_results table (ripeness/color/size data)
+            # 2. Save to classification_results table (ripeness/color/size data) WITH ORCHARD_ID FOR ISOLATION
             if classification_data:
                 classification_record = {
                     "detection_id": detection_id,
+                    "orchard_id": orchard_id,  # DATABASE-LEVEL ISOLATION: Store orchard_id directly
                     "ripeness_level": classification_data.get('ripeness_level'),
                     "confidence_score": classification_data.get('ripeness_confidence'),
                     "estimated_color": classification_data.get('color'),
@@ -205,12 +261,13 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
                 if not classification_result.data:
                     logger.warning(f"Failed to save classification result")
             
-            # 3. Save to disease_detections table (disease data)
+            # 3. Save to disease_detections table (disease data) WITH ORCHARD_ID FOR ISOLATION
             if fruit_detection.get('is_diseased') is not None:
                 disease_record = {
                     "detection_id": detection_id,
                     "user_id": str(user_id),
                     "image_id": str(image_id),
+                    "orchard_id": orchard_id,  # DATABASE-LEVEL ISOLATION: Store orchard_id directly
                     "disease_type": fruit_detection.get('disease_type', 'unknown'),
                     "is_diseased": fruit_detection.get('is_diseased', False),
                     "disease_confidence": fruit_detection.get('disease_confidence', 0.0),
@@ -243,6 +300,7 @@ async def process_single_image(image_id: UUID, user_id: UUID) -> DetectionRespon
                 detection_id=UUID(saved_detection['detection_id']),
                 user_id=UUID(saved_detection['user_id']),
                 image_id=UUID(saved_detection['image_id']),
+                orchard_id=UUID(saved_detection['orchard_id']) if saved_detection.get('orchard_id') else None,
                 fruit_type=saved_detection['fruit_type'],
                 confidence=float(saved_detection['confidence']),
                 bounding_box=BoundingBox(
@@ -367,15 +425,40 @@ async def get_detection_by_id(detection_id: UUID) -> DetectionResponse:
         annotated_image_filename=saved_data.get('annotated_image_filename')
     )
 
-async def get_all_detections(user_id: UUID, limit: int = 10, offset: int = 0) -> List[DetectionResponse]:
-    """Retrieve all detection results for a user with classification data"""
-    result = admin_supabase.table("detection_results")\
+async def get_all_detections(user_id: UUID, limit: int = 10, offset: int = 0, orchard_id: UUID = None) -> List[DetectionResponse]:
+    """Retrieve all detection results for a user with classification data, optionally filtered by orchard"""
+    filter_mode = "user_plus_orchard" if orchard_id else "user_only"
+    logger.info(
+        "🔎 [Detection Service] Fetch detections request | mode=%s user_id=%s orchard_id=%s limit=%s offset=%s",
+        filter_mode,
+        str(user_id),
+        str(orchard_id) if orchard_id else None,
+        limit,
+        offset,
+    )
+
+    query = admin_supabase.table("detection_results")\
         .select("*")\
-        .eq("user_id", str(user_id))\
-        .order("created_at", desc=True)\
+        .eq("user_id", str(user_id))
+    if orchard_id:
+        query = query.eq("orchard_id", str(orchard_id))
+    result = query.order("created_at", desc=True)\
         .limit(limit)\
         .offset(offset)\
         .execute()
+
+    returned_count = len(result.data) if result.data else 0
+    returned_user_ids = sorted({row.get("user_id") for row in (result.data or []) if row.get("user_id")})
+    returned_orchard_ids = sorted({row.get("orchard_id") for row in (result.data or []) if row.get("orchard_id")})
+    sample_detection_ids = [row.get("detection_id") for row in (result.data or [])[:5]]
+    logger.info(
+        "🔎 [Detection Service] Fetch detections response | mode=%s returned=%s users=%s orchards=%s sample_detection_ids=%s",
+        filter_mode,
+        returned_count,
+        returned_user_ids,
+        returned_orchard_ids,
+        sample_detection_ids,
+    )
         
     if not result.data:
         return []

@@ -15,6 +15,7 @@ from src.schemas.yield_schemas import (
     YieldPredictionRequest,
     YieldPredictionResponse,
     YieldPredictionHistoryResponse,
+    YieldPredictionContextResponse,
     HarvestRecordCreate,
     HarvestRecordResponse,
     UserYieldStats,
@@ -94,6 +95,7 @@ async def predict_yield(
 @router.get("/history", response_model=List[YieldPredictionHistoryResponse])
 async def get_yield_history(
     fruit_type: Optional[FruitType] = Query(None, description="Filter by fruit type"),
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     limit: int = Query(20, ge=1, le=100, description="Number of results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     current_user: dict = Depends(get_current_user)
@@ -128,6 +130,7 @@ async def get_yield_history(
         history = await yield_service.get_prediction_history(
             user_id=user_id,
             fruit_type=fruit_type,
+            orchard_id=orchard_id,
             limit=limit,
             offset=offset
         )
@@ -308,6 +311,7 @@ async def get_harvest_records(
 
 @router.get("/stats", response_model=UserYieldStats)
 async def get_yield_statistics(
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -335,25 +339,97 @@ async def get_yield_statistics(
     """
     try:
         user_id = UUID(current_user["user_id"])
-        
-        stats = await yield_service.get_user_yield_stats(user_id)
-        
+
+        stats = await yield_service.get_user_yield_stats(user_id, orchard_id=orchard_id)
+
         if not stats:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No yield data found for user"
+            # Return empty default stats for new users
+            return UserYieldStats(
+                fruit_type="mango",
+                predictions_count=0,
+                average_predicted_yield_kg=0,
+                average_confidence=0,
+                recent_predictions=[],
+                harvest_records=[],
+                historical_average_yield_kg=None,
+                trend=None,
             )
-        
+
         logger.info(f"📊 [API] Retrieved yield statistics for user {user_id}")
         return stats
-        
-    except HTTPException:
-        raise
+
     except Exception as e:
         logger.error(f"❌ [API] Failed to get statistics: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to calculate yield statistics"
+        )
+
+
+@router.get("/context/{orchard_id}", response_model=YieldPredictionContextResponse)
+async def get_prediction_context(
+    orchard_id: UUID,
+    window_days: int = Query(30, ge=1, le=365, description="Days of data to aggregate"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Build yield prediction request payload from database records for a specific orchard.
+
+    Aggregates detection results, classification data, disease detections,
+    and weather data from the database into a ready-to-use prediction request.
+    
+    ISOLATION ENFORCED:
+    - All detections are strictly filtered to images linked to THIS orchard only
+    - No cross-orchard data leakage, even if user has multiple orchards
+    - Data from Orchard A will never appear in results for Orchard B
+    """
+    try:
+        user_id = UUID(current_user["user_id"])
+        logger.info(
+            "🌾 [API] Building prediction context | user_id=%s orchard_id=%s window_days=%s",
+            str(user_id),
+            str(orchard_id),
+            window_days,
+        )
+
+        context = await yield_service.get_prediction_context_from_db(
+            user_id=user_id,
+            orchard_id=orchard_id,
+            window_days=window_days,
+        )
+
+        logger.info(
+            "✅ [API] Context built | user_id=%s orchard_id=%s detections=%s weather=%s classifications=%s diseases=%s",
+            str(user_id),
+            str(orchard_id),
+            context.sources.detection_records_used,
+            context.sources.weather_records_used,
+            context.sources.classification_records_used,
+            context.sources.disease_records_used,
+        )
+        return context
+
+    except ValueError as e:
+        logger.warning(
+            "⚠️ [API] Context build failed (validation) | orchard_id=%s window_days=%s detail=%s",
+            str(orchard_id),
+            window_days,
+            str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(
+            "❌ [API] Context build failed (unexpected) | orchard_id=%s window_days=%s detail=%s",
+            str(orchard_id),
+            window_days,
+            str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to build prediction context: {str(e)}"
         )
 
 

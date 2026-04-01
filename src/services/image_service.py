@@ -89,18 +89,47 @@ async def upload_image_service(user_id: str, file: UploadFile, metadata: Optiona
     if metadata is None:
         metadata = {}
     
+    logger.info(
+        "📸 [Image Service] Image metadata before update | user_id=%s image_id=%s incoming_metadata=%s",
+        user_id,
+        image_id,
+        metadata,
+    )
+    
     metadata.update({
         "original_filename": file.filename,
         "storage_filename": storage_file_name,
         "content_type": file.content_type
     })
     
+    logger.info(
+        "📸 [Image Service] Metadata after file info update | user_id=%s image_id=%s metadata_keys=%s",
+        user_id,
+        image_id,
+        list(metadata.keys()),
+    )
+    
+    # Log orchard_id presence EARLY
+    if "orchard_id" in metadata:
+        logger.info(
+            "🔐 [Image Service] ORCHARD_ID PRESENT IN METADATA | user_id=%s image_id=%s orchard_id=%s",
+            user_id,
+            image_id,
+            metadata["orchard_id"],
+        )
+    else:
+        logger.warning(
+            "⚠️ [Image Service] ORCHARD_ID MISSING FROM METADATA | user_id=%s image_id=%s",
+            user_id,
+            image_id,
+        )
+    
     # Add GPS data to metadata if available
     if gps_data:
         metadata.update(gps_data)
-        print(f"✅ GPS data added to metadata: {gps_data}")
+        logger.info(f"✅ GPS data added to metadata: {gps_data}")
     else:
-        print(f"⚠️ No GPS data found in image")
+        logger.info(f"⚠️ No GPS data found in image")
     
     # Create database record using admin client for now (we'll add RLS policies later)
     data = {
@@ -112,12 +141,26 @@ async def upload_image_service(user_id: str, file: UploadFile, metadata: Optiona
         "created_at": now.isoformat()
     }
     
+    logger.info(
+        "💾 [Image Service] INSERTING IMAGE RECORD INTO DB | user_id=%s image_id=%s orchard_id=%s metadata=%s",
+        user_id,
+        image_id,
+        metadata.get("orchard_id", "MISSING"),
+        metadata,
+    )
+    
     try:
         result = admin_supabase.table("images").insert(data).execute()
         if not result.data:
             raise Exception("No data returned from database insert")
-        print(f"Successfully created database record for image {image_id}")
-        return ImageCreateResponse(**result.data[0])
+        inserted_record = result.data[0]
+        logger.info(
+            "✅ [Image Service] IMAGE RECORD INSERTED INTO DB | user_id=%s image_id=%s orchard_id_in_db=%s",
+            user_id,
+            image_id,
+            inserted_record.get("metadata", {}).get("orchard_id", "MISSING_IN_RESPONSE"),
+        )
+        return ImageCreateResponse(**inserted_record)
     except Exception as e:
         # If database insert fails, try to delete the uploaded file
         print(f"Database insert failed: {str(e)}")

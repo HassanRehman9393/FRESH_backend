@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 async def get_fruit_quality_analytics(
     start_date: Optional[date] = Query(None, description="Start date for analysis (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="End date for analysis (YYYY-MM-DD)"),
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -45,11 +46,11 @@ async def get_fruit_quality_analytics(
     - Ripeness distribution
     - Quality scores
     - Defect analysis
-    
+
     **Default period:** Last 30 days if dates not specified
-    
+
     **Requires authentication**
-    
+
     **Note:** Returns empty analytics if no detection data is available for the user.
     """
     try:
@@ -59,14 +60,15 @@ async def get_fruit_quality_analytics(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User ID not found in authentication token"
             )
-        
+
         result = await get_quality_analytics(
             user_id=UUID(user_id),
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            orchard_id=orchard_id,
         )
         return result
-        
+
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -78,7 +80,7 @@ async def get_fruit_quality_analytics(
         import traceback
         error_trace = traceback.format_exc()
         logger.error(f"Error in quality analytics: {error_trace}")
-        
+
         # Return user-friendly error
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -89,6 +91,7 @@ async def get_fruit_quality_analytics(
 async def get_fruit_quality_trends(
     start_date: Optional[date] = Query(None, description="Start date for analysis (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="End date for analysis (YYYY-MM-DD)"),
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -96,16 +99,17 @@ async def get_fruit_quality_trends(
     - Daily quality score progression
     - Defect rate trends
     - Detection volume trends
-    
+
     **Default period:** Last 30 days if dates not specified
-    
+
     **Requires authentication**
     """
     try:
         return await get_quality_trends(
             user_id=UUID(current_user["user_id"]),
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            orchard_id=orchard_id,
         )
     except Exception as e:
         raise HTTPException(
@@ -119,6 +123,7 @@ async def get_fruit_quality_trends(
 async def get_disease_risk_analysis(
     start_date: Optional[date] = Query(None, description="Start date for analysis (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="End date for analysis (YYYY-MM-DD)"),
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -128,16 +133,17 @@ async def get_disease_risk_analysis(
     - Severity analysis
     - Risk assessment (low, medium, high, critical)
     - Actionable recommendations
-    
+
     **Default period:** Last 30 days if dates not specified
-    
+
     **Requires authentication**
     """
     try:
         return await get_disease_risk_analytics(
             user_id=UUID(current_user["user_id"]),
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            orchard_id=orchard_id,
         )
     except Exception as e:
         raise HTTPException(
@@ -149,6 +155,7 @@ async def get_disease_risk_analysis(
 async def get_disease_risk_trend_analysis(
     start_date: Optional[date] = Query(None, description="Start date for analysis (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="End date for analysis (YYYY-MM-DD)"),
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -156,16 +163,17 @@ async def get_disease_risk_trend_analysis(
     - Daily infection rate progression
     - Disease outbreak patterns
     - Risk level changes
-    
+
     **Default period:** Last 30 days if dates not specified
-    
+
     **Requires authentication**
     """
     try:
         return await get_disease_risk_trends(
             user_id=UUID(current_user["user_id"]),
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            orchard_id=orchard_id,
         )
     except Exception as e:
         raise HTTPException(
@@ -179,6 +187,7 @@ async def get_disease_risk_trend_analysis(
 async def get_fruit_yield_analytics(
     start_date: Optional[date] = Query(None, description="Start date for analysis (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="End date for analysis (YYYY-MM-DD)"),
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -187,21 +196,17 @@ async def get_fruit_yield_analytics(
     - Marketable fruit count and percentage
     - Estimated weight calculations
     - Best performing fruit types
-    
-    **Marketable criteria:**
-    - Ripeness: ripe or unripe (not overripe/rotten)
-    - Defects: maximum 1 minor defect
-    - Quality score: minimum 60/100
-    
+
     **Default period:** Last 30 days if dates not specified
-    
+
     **Requires authentication**
     """
     try:
         return await get_yield_analytics(
             user_id=UUID(current_user["user_id"]),
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            orchard_id=orchard_id,
         )
     except Exception as e:
         raise HTTPException(
@@ -213,27 +218,22 @@ async def get_fruit_yield_analytics(
 async def get_yield_period_comparison(
     start_date: Optional[date] = Query(None, description="Start date for current period (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="End date for current period (YYYY-MM-DD)"),
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Compare yield between current period and previous period:
-    - Current period analytics
-    - Previous period analytics (same duration)
-    - Growth rate calculation (% change)
-    
-    **Example:**
-    - Current: Jan 1 - Jan 31 (31 days)
-    - Previous: Dec 1 - Dec 31 (31 days)
-    
+    Compare yield between current period and previous period.
+
     **Default period:** Last 30 days vs previous 30 days
-    
+
     **Requires authentication**
     """
     try:
         return await get_yield_comparison(
             user_id=UUID(current_user["user_id"]),
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            orchard_id=orchard_id,
         )
     except Exception as e:
         raise HTTPException(
@@ -248,38 +248,15 @@ async def get_export_readiness_report(
     start_date: Optional[date] = Query(None, description="Start date for analysis (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="End date for analysis (YYYY-MM-DD)"),
     target_market: Optional[str] = Query(None, description="Target export market (e.g., 'EU', 'US', 'Asia')"),
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get comprehensive export readiness report including:
-    - Export quality compliance metrics
-    - Ripeness, size, and defect compliance
-    - Disease-free rate
-    - Overall readiness score
-    - Rejection reasons analysis
-    - Market-specific recommendations
-    
-    **Export readiness criteria:**
-    - Overall compliance score ≥ 75%
-    - Disease-free
-    - Appropriate ripeness level
-    - Size standards met
-    - Minimal defects
-    
-    **Readiness Score Interpretation:**
-    - 90-100%: Premium export markets (EU, US, Japan)
-    - 75-89%: Standard export markets (Asia, Middle East)
-    - 60-74%: Domestic markets recommended
-    - <60%: Processing/juice markets
-    
+    Get comprehensive export readiness report.
+
     **Default period:** Last 30 days if dates not specified
-    
+
     **Requires authentication**
-    
-    **Role-based access:**
-    - Exporters get full detailed reports
-    - Farmers get basic readiness scores
-    - Government officials get compliance summaries
     """
     try:
         user_id = current_user.get("user_id")
@@ -288,15 +265,16 @@ async def get_export_readiness_report(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User ID not found in authentication token"
             )
-        
+
         result = await get_export_readiness(
             user_id=UUID(user_id),
             start_date=start_date,
             end_date=end_date,
-            target_market=target_market
+            target_market=target_market,
+            orchard_id=orchard_id,
         )
         return result
-        
+
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -308,7 +286,7 @@ async def get_export_readiness_report(
         import traceback
         error_trace = traceback.format_exc()
         logger.error(f"Error in export readiness: {error_trace}")
-        
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unable to generate export readiness report. Error: {str(e)}"
@@ -320,29 +298,22 @@ async def get_export_readiness_report(
 async def get_comprehensive_analytics_summary(
     start_date: Optional[date] = Query(None, description="Start date for analysis (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="End date for analysis (YYYY-MM-DD)"),
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get comprehensive analytics summary combining all key metrics:
-    - Quality score
-    - Disease risk level
-    - Infection rate
-    - Total and marketable yield
-    - Export readiness score
-    - Top performing fruit
-    - Areas for improvement
-    
-    **Perfect for dashboard overview!**
-    
+    Get comprehensive analytics summary combining all key metrics.
+
     **Default period:** Last 30 days if dates not specified
-    
+
     **Requires authentication**
     """
     try:
         return await get_analytics_summary(
             user_id=UUID(current_user["user_id"]),
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            orchard_id=orchard_id,
         )
     except Exception as e:
         raise HTTPException(

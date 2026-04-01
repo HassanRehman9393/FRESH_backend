@@ -7,7 +7,7 @@ Handles database interactions and ML API communication.
 
 from uuid import UUID
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import httpx
 from src.core.supabase_client import admin_supabase
@@ -25,6 +25,8 @@ from src.schemas.yield_schemas import (
     ContributingFactors,
     SamplingDetails,
     BaselineComparison,
+    YieldPredictionContextResponse,
+    YieldDataSources,
     FruitType,
     TrendDirection,
     ModelUsed,
@@ -34,10 +36,57 @@ logger = logging.getLogger(__name__)
 
 
 class YieldService:
-    """Service for yield prediction operations"""
+    """Service for yield prediction operations
+    
+    DATA ISOLATION POLICY:
+    =====================
+    All detections, classifications, and disease data are STRICTLY isolated per orchard.
+    
+    - Detections are ONLY retrieved from images explicitly linked to the target orchard (via images.metadata.orchard_id)
+    - NO user-wide detection fallback queries are performed
+    - This ensures that data from Orchard A never appears when predicting for Orchard B,
+      even if both orchards belong to the same user
+    
+    Implementation:
+    - Images must have metadata.orchard_id set when uploaded
+    - Context builder filters: images -> detections -> classifications/diseases
+    - If no orchard-linked images exist, context building fails with actionable error
+    """
     
     ML_API_TIMEOUT = settings.ml_api_timeout
     ML_API_URL = settings.ml_api_url
+    
+    @staticmethod
+    async def _validate_orchard_ownership(
+        user_id: UUID,
+        orchard_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Validate that orchard exists and belongs to the user.
+        Returns orchard record if valid, raises ValueError otherwise.
+        
+        This is the gatekeeper for orchard isolation - all operations must verify
+        the user can access the orchard before querying its data.
+        """
+        orchard_id_str = str(orchard_id)
+        response = admin_supabase.table("orchards").select(
+            "id, area_hectares, fruit_types, created_at, user_id"
+        ).eq("id", orchard_id_str).eq("user_id", str(user_id)).limit(1).execute()
+        
+        if not response.data:
+            logger.warning(
+                "🔐 [Yield Service] Orchard access denied | user_id=%s orchard_id=%s reason=not_found_or_not_owned",
+                str(user_id),
+                orchard_id_str,
+            )
+            raise ValueError("Selected orchard was not found for this user")
+        
+        logger.info(
+            "🔐 [Yield Service] Orchard ownership verified | user_id=%s orchard_id=%s",
+            str(user_id),
+            orchard_id_str,
+        )
+        return response.data[0]
     
     @staticmethod
     async def predict_yield(
@@ -182,9 +231,9 @@ class YieldService:
             ml_url = f"{YieldService.ML_API_URL}/api/yield/predict"
             
             payload = {
-                "detection_aggregates": request.detection_aggregates.model_dump(),
-                "weather_data": request.weather_data.model_dump(),
-                "orchard_metadata": request.orchard_metadata.model_dump(by_alias=False),
+                "detection_aggregates": request.detection_aggregates.model_dump(mode="json"),
+                "weather_data": request.weather_data.model_dump(mode="json"),
+                "orchard_metadata": request.orchard_metadata.model_dump(mode="json", by_alias=False),
             }
             
             logger.info(f"📡 Calling ML API: {ml_url}")
@@ -205,8 +254,15 @@ class YieldService:
     async def _save_prediction_to_db(prediction: YieldPredictionCreate) -> YieldPredictionDB:
         """Save prediction to database"""
         try:
+            prediction_payload = prediction.model_dump(mode="json")
+            logger.info(
+                "💾 [Yield Service] Saving prediction | user_id=%s orchard_id=%s fruit_type=%s",
+                prediction_payload.get("user_id"),
+                prediction_payload.get("orchard_id"),
+                prediction_payload.get("fruit_type"),
+            )
             response = admin_supabase.table('yield_predictions').insert(
-                prediction.model_dump()
+                prediction_payload
             ).execute()
             
             if response.data:
@@ -222,16 +278,19 @@ class YieldService:
     async def get_prediction_history(
         user_id: UUID,
         fruit_type: Optional[FruitType] = None,
+        orchard_id: Optional[UUID] = None,
         limit: int = 20,
         offset: int = 0
     ) -> List[YieldPredictionHistoryResponse]:
-        """Get user's yield prediction history"""
+        """Get user's yield prediction history, optionally filtered by orchard"""
         try:
             query = admin_supabase.table('yield_predictions').select(
-                'id, prediction_date, fruit_type, predicted_yield_kg, confidence, '
+                'id, prediction_date, fruit_type, predicted_yield_kg, confidence_score, '
                 'trend_direction, orchard_area_hectares'
             ).eq('user_id', str(user_id))
-            
+
+            if orchard_id:
+                query = query.eq('orchard_id', str(orchard_id))
             if fruit_type:
                 query = query.eq('fruit_type', fruit_type)
             
@@ -239,8 +298,14 @@ class YieldService:
                 offset, offset + limit - 1
             ).execute()
             
-            return [YieldPredictionHistoryResponse(**item) for item in response.data]
-            
+            results = []
+            for item in response.data:
+                # Map DB column confidence_score to schema field confidence
+                if 'confidence_score' in item and 'confidence' not in item:
+                    item['confidence'] = item.pop('confidence_score')
+                results.append(YieldPredictionHistoryResponse(**item))
+            return results
+
         except Exception as e:
             logger.error(f"❌ Failed to get prediction history: {str(e)}")
             return []
@@ -273,7 +338,7 @@ class YieldService:
     ) -> HarvestRecordResponse:
         """Register actual harvest yield for future model training"""
         try:
-            record_data = harvest_record.model_dump()
+            record_data = harvest_record.model_dump(mode="json")
             record_data['user_id'] = str(user_id)
             record_data['yield_per_hectare'] = (
                 record_data['actual_yield_kg'] / record_data['orchard_area_hectares']
@@ -312,15 +377,333 @@ class YieldService:
         except Exception as e:
             logger.error(f"❌ Failed to get harvest records: {str(e)}")
             return []
+
+    @staticmethod
+    async def get_prediction_context_from_db(
+        user_id: UUID,
+        orchard_id: UUID,
+        window_days: int = 30,
+    ) -> YieldPredictionContextResponse:
+        """
+        Build yield prediction request payload from persisted DB records.
+        
+        ISOLATION ENFORCED: All data retrieved is strictly filtered to the target orchard.
+        No cross-orchard data will be included regardless of user's other orchards.
+        """
+        orchard_id_str = str(orchard_id)
+        effective_window_days = max(1, window_days)
+
+        logger.info(
+            "🌾 [Yield Service] Context build start (ISOLATED MODE) | user_id=%s orchard_id=%s window_days=%s",
+            str(user_id),
+            orchard_id_str,
+            effective_window_days,
+        )
+
+        # GATE 1: Verify orchard ownership (prevents cross-user access)
+        orchard = await YieldService._validate_orchard_ownership(user_id, orchard_id)
+        
+        logger.info(
+            "🌾 [Yield Service] Orchard loaded | orchard_id=%s area_hectares=%s fruit_types=%s",
+            orchard_id_str,
+            orchard.get("area_hectares"),
+            orchard.get("fruit_types") or [],
+        )
+
+        # GATE 2: Retrieve only images linked to THIS orchard (prevents cross-orchard data)
+        image_response = admin_supabase.table("images").select(
+            "id, metadata, created_at"
+        ).eq("user_id", str(user_id)).contains(
+            "metadata", {"orchard_id": orchard_id_str}
+        ).order("created_at", desc=True).limit(300).execute()
+
+        image_ids = [img["id"] for img in image_response.data] if image_response.data else []
+        fruit_candidates = orchard.get("fruit_types") or []
+        logger.info(
+            "🔐 [Yield Service] Orchard-linked images query (ISOLATION) | orchard_id=%s image_count=%s",
+            orchard_id_str,
+            len(image_ids),
+        )
+
+        # GATE 3: Get detections ONLY from this orchard via direct orchard_id filter (DATABASE ISOLATION)
+        # This provides defense-in-depth: orchard_id is stored directly in detection_results,
+        # so even if image association breaks, orchard isolation is still enforced
+        detections = []
+        if image_ids:
+            # Primary query: from image_ids AND orchard_id (dual filtering)
+            logger.info(
+                "🔐 [Yield Service] EXECUTING DETECTION QUERY | orchard_id=%s filters: image_ids count=%s",
+                orchard_id_str,
+                len(image_ids),
+            )
+            
+            detection_response = admin_supabase.table("detection_results").select(
+                "detection_id, image_id, confidence, fruit_type, orchard_id"
+            ).eq("user_id", str(user_id)).eq("orchard_id", orchard_id_str).in_("image_id", image_ids).order("created_at", desc=True).limit(1000).execute()
+            
+            detections = detection_response.data or []
+            logger.info(
+                "🔐 [Detection Service] QUERY RESULT - Detection rows returned: %s | all have orchard_id=%s? Checking...",
+                len(detections),
+                orchard_id_str,
+            )
+            
+            # Verify all returned detections have the correct orchard_id
+            if detections:
+                orchard_ids_in_result = set(d.get('orchard_id') for d in detections)
+                logger.info(
+                    "🔐 [Yield Service] RETURNED DETECTIONS ORCHARD_IDS: %s | Expected: %s",
+                    orchard_ids_in_result,
+                    orchard_id_str,
+                )
+                for idx, det in enumerate(detections[:3]):  # Log first 3
+                    logger.info(
+                        "🔐 [Yield Service] Sample detection [%s]: detection_id=%s orchard_id=%s image_id=%s",
+                        idx,
+                        det.get('detection_id'),
+                        det.get('orchard_id'),
+                        det.get('image_id'),
+                    )
+            
+            logger.info(
+                "🔐 [Yield Service] Detections from ORCHARD-ID FILTERED QUERY (ISOLATION) | orchard_id=%s detections=%s",
+                orchard_id_str,
+                len(detections),
+            )
+            
+            # Fallback: if query with image_ids returns nothing but orchard_id detections exist,
+            # get detections from orchard ONLY (handles unlinked images edge case)
+            if not detections:
+                logger.info(
+                    "🔐 [Yield Service] Image-linked query returned empty, trying orchard_id-only query as fallback | orchard_id=%s",
+                    orchard_id_str,
+                )
+                detection_response_fallback = admin_supabase.table("detection_results").select(
+                    "detection_id, image_id, confidence, fruit_type, orchard_id"
+                ).eq("user_id", str(user_id)).eq("orchard_id", orchard_id_str).order("created_at", desc=True).limit(1000).execute()
+                detections = detection_response_fallback.data or []
+                logger.info(
+                    "🔐 [Yield Service] Fallback orchard_id-only query result | orchard_id=%s detections=%s",
+                    orchard_id_str,
+                    len(detections),
+                )
+
+        # STRICT ISOLATION: No fallback to user-wide detections.
+        # Detections must be from images explicitly linked to this orchard.
+        # This ensures orchard data is never mixed between orchards even if same user.
+        if not detections:
+            logger.warning(
+                "⚠️ [Yield Service] No detections found - orchard has no linked images | user_id=%s orchard_id=%s image_count=%s",
+                str(user_id),
+                orchard_id_str,
+                len(image_ids),
+            )
+            raise ValueError(
+                f"No detection results found for this orchard. "
+                f"Please upload images to orchard '{orchard_id}' first and they will appear here. "
+                f"Currently {len(image_ids)} orchard-linked image(s) found."
+            )
+
+        detection_ids = [d["detection_id"] for d in detections if d.get("detection_id")]
+
+        classifications = []
+        diseases = []
+        if detection_ids:
+            # Query classifications with BOTH detection_id AND orchard_id filters (defense-in-depth)
+            logger.info(
+                "🔐 [Yield Service] QUERYING CLASSIFICATIONS | orchard_id=%s detection_ids count=%s",
+                orchard_id_str,
+                len(detection_ids),
+            )
+            
+            classification_response = admin_supabase.table("classification_results").select(
+                "detection_id, ripeness_level, orchard_id"
+            ).eq("orchard_id", orchard_id_str).in_("detection_id", detection_ids).execute()
+            classifications = classification_response.data or []
+            
+            logger.info(
+                "🔐 [Yield Service] CLASSIFICATIONS RETURNED | orchard_id=%s count=%s | checking orchard isolation...",
+                orchard_id_str,
+                len(classifications),
+            )
+            
+            if classifications:
+                classification_orchard_ids = set(c.get('orchard_id') for c in classifications)
+                logger.info(
+                    "🔐 [Yield Service] Classification results have orchard_ids: %s | Expected: %s",
+                    classification_orchard_ids,
+                    orchard_id_str,
+                )
+
+            # Query diseases with BOTH detection_id AND orchard_id filters (defense-in-depth)
+            logger.info(
+                "🔐 [Yield Service] QUERYING DISEASES | orchard_id=%s detection_ids count=%s",
+                orchard_id_str,
+                len(detection_ids),
+            )
+            
+            disease_response = admin_supabase.table("disease_detections").select(
+                "detection_id, is_diseased, orchard_id"
+            ).eq("orchard_id", orchard_id_str).in_("detection_id", detection_ids).execute()
+            diseases = disease_response.data or []
+            
+            logger.info(
+                "🔐 [Yield Service] DISEASES RETURNED | orchard_id=%s count=%s | checking orchard isolation...",
+                orchard_id_str,
+                len(diseases),
+            )
+            
+            if diseases:
+                disease_orchard_ids = set(d.get('orchard_id') for d in diseases)
+                logger.info(
+                    "🔐 [Yield Service] Disease results have orchard_ids: %s | Expected: %s",
+                    disease_orchard_ids,
+                    orchard_id_str,
+                )
+
+        logger.info(
+            "🔐 [Yield Service] Linked result rows (FROM ORCHARD_ID FILTERED QUERIES) | detections=%s classifications=%s diseases=%s",
+            len(detections),
+            len(classifications),
+            len(diseases),
+        )
+
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=effective_window_days)
+        weather_response = admin_supabase.table("weather_data").select(
+            "temperature, temp_min, temp_max, humidity, rainfall, recorded_at"
+        ).eq("orchard_id", orchard_id_str).gte(
+            "recorded_at", start_date.isoformat()
+        ).lte(
+            "recorded_at", end_date.isoformat()
+        ).order("recorded_at", desc=True).execute()
+
+        weather_rows = weather_response.data or []
+        if not weather_rows:
+            logger.warning(
+                "⚠️ [Yield Service] No weather rows found | orchard_id=%s start=%s end=%s",
+                orchard_id_str,
+                start_date.isoformat(),
+                end_date.isoformat(),
+            )
+            raise ValueError("No weather history found for this orchard. Open weather dashboard to fetch weather first.")
+
+        logger.info(
+            "🌾 [Yield Service] Weather rows loaded | orchard_id=%s rows=%s start=%s end=%s",
+            orchard_id_str,
+            len(weather_rows),
+            start_date.isoformat(),
+            end_date.isoformat(),
+        )
+
+        total_fruits = len(detections)
+        avg_confidence = sum(float(d.get("confidence", 0)) for d in detections) / max(total_fruits, 1)
+        detection_count = len({str(d.get("image_id")) for d in detections if d.get("image_id")})
+        coverage_score = min(1.0, detection_count / 20)
+
+        ripe = 0
+        unripe = 0
+        overripe = 0
+        for cls in classifications:
+            level = str(cls.get("ripeness_level", "")).lower()
+            if level == "ripe":
+                ripe += 1
+            elif level == "overripe":
+                overripe += 1
+            else:
+                unripe += 1
+
+        if not classifications:
+            unripe = total_fruits
+
+        total_classified = max(ripe + unripe + overripe, 1)
+        ripe_percentage = (ripe / total_classified) * 100
+        unripe_percentage = (unripe / total_classified) * 100
+        overripe_percentage = (overripe / total_classified) * 100
+
+        diseased_count = sum(1 for d in diseases if d.get("is_diseased"))
+        disease_percentage = (diseased_count / max(total_fruits, 1)) * 100
+
+        temperatures = [float(w.get("temperature", 0)) for w in weather_rows]
+        temp_mins = [float(w.get("temp_min", w.get("temperature", 0))) for w in weather_rows]
+        temp_maxs = [float(w.get("temp_max", w.get("temperature", 0))) for w in weather_rows]
+        humidities = [float(w.get("humidity", 0)) for w in weather_rows]
+        rainfalls = [float(w.get("rainfall", 0)) for w in weather_rows]
+
+        fruit_value = fruit_candidates[0] if fruit_candidates else "mango"
+        if fruit_value not in {"mango", "orange", "guava", "grapefruit"}:
+            fruit_value = "mango"
+
+        orchard_created_at_raw = orchard.get("created_at")
+        orchard_created_at = datetime.utcnow()
+        if orchard_created_at_raw:
+            orchard_created_at = datetime.fromisoformat(str(orchard_created_at_raw).replace("Z", "+00:00")).replace(tzinfo=None)
+
+        payload = YieldPredictionRequest(
+            detection_aggregates={
+                "total_fruits": total_fruits,
+                "ripe_percentage": round(ripe_percentage, 2),
+                "unripe_percentage": round(unripe_percentage, 2),
+                "overripe_percentage": round(overripe_percentage, 2),
+                "disease_percentage": round(disease_percentage, 2),
+                "average_confidence": round(avg_confidence, 4),
+                "coverage_score": round(coverage_score, 4),
+                "detection_count": detection_count,
+            },
+            weather_data={
+                "temperature_avg": round(sum(temperatures) / max(len(temperatures), 1), 2),
+                "temperature_min": round(min(temp_mins), 2),
+                "temperature_max": round(max(temp_maxs), 2),
+                "rainfall_sum": round(sum(rainfalls), 2),
+                "humidity_avg": round(sum(humidities) / max(len(humidities), 1), 2),
+                "humidity_min": round(min(humidities), 2),
+                "humidity_max": round(max(humidities), 2),
+                "data_points": len(weather_rows),
+            },
+            orchard_metadata={
+                "area_hectares": float(orchard.get("area_hectares") or 1.0),
+                "fruit_type": fruit_value,
+                "days_since_planting": max((datetime.utcnow() - orchard_created_at).days, 0),
+                "orchard_id": orchard_id_str,
+            },
+        )
+
+        logger.info(
+            "✅ [Yield Service] Context build complete (ISOLATED TO ORCHARD) | orchard_id=%s total_fruits=%s detection_count=%s coverage=%s ripe_pct=%s disease_pct=%s",
+            orchard_id_str,
+            total_fruits,
+            detection_count,
+            round(coverage_score, 4),
+            round(ripe_percentage, 2),
+            round(disease_percentage, 2),
+        )
+
+        return YieldPredictionContextResponse(
+            payload=payload,
+            sources=YieldDataSources(
+                orchard_id=orchard_id,
+                weather_records_used=len(weather_rows),
+                detection_records_used=len(detections),
+                disease_records_used=len(diseases),
+                classification_records_used=len(classifications),
+                time_window_days=effective_window_days,
+            ),
+        )
     
     @staticmethod
-    async def get_user_yield_stats(user_id: UUID) -> Optional[UserYieldStats]:
-        """Get comprehensive yield statistics for user"""
+    async def get_user_yield_stats(
+        user_id: UUID,
+        orchard_id: Optional[UUID] = None,
+    ) -> Optional[UserYieldStats]:
+        """Get comprehensive yield statistics for user, optionally filtered by orchard"""
         try:
             # Get predictions
-            predictions = admin_supabase.table('yield_predictions').select(
+            query = admin_supabase.table('yield_predictions').select(
                 '*'
-            ).eq('user_id', str(user_id)).execute()
+            ).eq('user_id', str(user_id))
+            if orchard_id:
+                query = query.eq('orchard_id', str(orchard_id))
+            predictions = query.execute()
             
             # Calculate stats by fruit type
             stats_by_fruit = {}
@@ -344,14 +727,20 @@ class YieldService:
                 fruit_type = recent['fruit_type']
                 fruit_stats = stats_by_fruit[fruit_type]
                 
+                # Map DB records to history response (confidence_score -> confidence)
+                recent = []
+                for p in fruit_stats['records'][:5]:
+                    mapped = dict(p)
+                    if 'confidence_score' in mapped and 'confidence' not in mapped:
+                        mapped['confidence'] = mapped.pop('confidence_score')
+                    recent.append(YieldPredictionHistoryResponse(**mapped))
+
                 return UserYieldStats(
                     fruit_type=fruit_type,
                     predictions_count=fruit_stats['count'],
                     average_predicted_yield_kg=fruit_stats['total_yield'] / fruit_stats['count'],
                     average_confidence=fruit_stats['total_confidence'] / fruit_stats['count'],
-                    recent_predictions=[
-                        YieldPredictionHistoryResponse(**p) for p in fruit_stats['records'][:5]
-                    ],
+                    recent_predictions=recent,
                     harvest_records=await YieldService.get_user_harvest_records(user_id, fruit_type),
                 )
             

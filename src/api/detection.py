@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException, status, Query, Depends, UploadFile, File
 from typing import List, Optional
 from uuid import UUID
+import logging
+
 from src.schemas.detection import (
     DetectionResponse, 
     BatchDetectionRequest, 
@@ -15,6 +17,7 @@ from src.services.detection_service import (
 from src.api.deps import get_current_user
 
 router = APIRouter(prefix="/detection", tags=["detection"])
+logger = logging.getLogger(__name__)
 
 @router.post("/batch-fruit", response_model=BatchDetectionResponse)
 async def batch_detect_fruits(
@@ -39,15 +42,33 @@ async def batch_detect_fruits(
 async def get_detection_results(
     limit: int = Query(default=10, le=100),
     offset: int = Query(default=0, ge=0),
+    orchard_id: Optional[UUID] = Query(None, description="Filter by orchard"),
     current_user: dict = Depends(get_current_user)
 ):
     """
     Retrieve all detection results for the authenticated user.
     Supports pagination with limit and offset parameters.
+    Optionally filtered by orchard_id.
     Requires authentication.
     """
     try:
-        return await get_all_detections(UUID(current_user["user_id"]), limit, offset)
+        filter_mode = "user_plus_orchard" if orchard_id else "user_only"
+        logger.info(
+            "🔎 [Detection API] /fruit/results request | mode=%s user_id=%s orchard_id=%s limit=%s offset=%s",
+            filter_mode,
+            current_user["user_id"],
+            str(orchard_id) if orchard_id else None,
+            limit,
+            offset,
+        )
+
+        detections = await get_all_detections(UUID(current_user["user_id"]), limit, offset, orchard_id=orchard_id)
+        logger.info(
+            "🔎 [Detection API] /fruit/results response | mode=%s count=%s",
+            filter_mode,
+            len(detections),
+        )
+        return detections
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

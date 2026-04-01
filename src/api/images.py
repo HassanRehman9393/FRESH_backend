@@ -10,23 +10,44 @@ router = APIRouter(prefix="/images", tags=["images"])
 @router.post("/upload", response_model=ImageCreateResponse, status_code=status.HTTP_201_CREATED)
 async def upload_image(
     file: UploadFile = File(...), 
+    orchard_id: Optional[str] = Query(default=None),
     metadata: Optional[Any] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Upload a single image. Requires authentication."""
+    """Upload a single image. Requires authentication. Optional orchard_id tags the image to a specific orchard."""
+    # Build metadata dict with orchard_id
+    if metadata is None:
+        metadata = {}
+    elif isinstance(metadata, str):
+        import json
+        try:
+            metadata = json.loads(metadata)
+        except:
+            metadata = {}
+    
+    # Add orchard_id if provided
+    if orchard_id:
+        metadata["orchard_id"] = orchard_id
+    
     result = await upload_image_service(current_user["user_id"], file, metadata)
     return result
 
 @router.post("/batch-upload", status_code=status.HTTP_201_CREATED)
 async def batch_upload_images(
-    files: List[UploadFile] = File(...), 
+    files: List[UploadFile] = File(...),
+    orchard_id: Optional[str] = Query(default=None),
     current_user: dict = Depends(get_current_user)
 ):
-    """Upload multiple images. Requires authentication."""
+    """Upload multiple images. Requires authentication. Optional orchard_id tags all images to a specific orchard."""
     responses = []
     for file in files:
         try:
-            resp = await upload_image_service(current_user["user_id"], file)
+            # Build metadata dict with orchard_id
+            metadata = {}
+            if orchard_id:
+                metadata["orchard_id"] = orchard_id
+            
+            resp = await upload_image_service(current_user["user_id"], file, metadata if metadata else None)
             responses.append(resp)
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))

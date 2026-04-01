@@ -15,6 +15,7 @@ class DiseaseDetectionResponse(BaseModel):
     detection_id: UUID
     user_id: UUID
     image_id: UUID
+    orchard_id: Optional[UUID] = None  # Orchard association for strict data isolation
     disease_type: str = Field(..., description="One of: healthy, anthracnose, citrus_canker, unknown")
     is_diseased: bool
     disease_confidence: float = Field(..., ge=0.0, le=1.0)

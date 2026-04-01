@@ -29,6 +29,7 @@ class DetectionResponse(BaseModel):
     detection_id: UUID
     user_id: UUID
     image_id: UUID
+    orchard_id: Optional[UUID] = None  # Orchard association for strict data isolation
     fruit_type: str
     confidence: float
     bounding_box: BoundingBox

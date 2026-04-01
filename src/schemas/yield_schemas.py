@@ -222,11 +222,15 @@ class HarvestRecordResponse(BaseModel):
     id: UUID
     user_id: UUID
     fruit_type: FruitType
-    yield_per_hectare: float
+    orchard_area_hectares: float
     actual_yield_kg: float
+    yield_per_hectare: float
     harvest_date: str
     season: int
+    weather_conditions: Optional[Dict[str, Any]] = None
+    quality_notes: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 # =========== SUMMARY SCHEMAS ===========
@@ -251,3 +255,19 @@ class UserYieldStats(BaseModel):
     harvest_records: List[HarvestRecordResponse]
     historical_average_yield_kg: Optional[float] = None
     trend: Optional[TrendDirection] = None
+
+
+class YieldDataSources(BaseModel):
+    """Metadata about DB records used for auto-built prediction context"""
+    orchard_id: UUID
+    weather_records_used: int
+    detection_records_used: int
+    disease_records_used: int
+    classification_records_used: int
+    time_window_days: int
+
+
+class YieldPredictionContextResponse(BaseModel):
+    """DB-driven payload for yield prediction request"""
+    payload: YieldPredictionRequest
+    sources: YieldDataSources
