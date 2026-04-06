@@ -8,7 +8,8 @@ from google.auth.transport import requests
 from authlib.integrations.starlette_client import OAuth
 import uuid
 import httpx
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from urllib.parse import quote
 
 # Initialize OAuth client
 oauth = OAuth()
@@ -100,16 +101,21 @@ def login_user(user: UserLogin) -> UserResponseWithAuth:
         token_type="bearer"
     )
 
-def get_google_auth_url() -> str:
+def get_google_auth_url(redirect_uri: Optional[str] = None, state: Optional[str] = None) -> str:
     """Generate Google OAuth authorization URL."""
+    callback_uri = redirect_uri or settings.google_redirect_uri
     google_auth_url = (
         f"https://accounts.google.com/o/oauth2/auth?"
         f"client_id={settings.google_client_id}&"
-        f"redirect_uri={settings.google_redirect_uri}&"
+        f"redirect_uri={callback_uri}&"
         f"scope=openid email profile&"
         f"response_type=code&"
         f"access_type=offline"
     )
+
+    if state:
+        google_auth_url += f"&state={quote(state, safe='')}"
+
     return google_auth_url
 
 async def verify_google_token(token: str) -> Dict[str, Any]:
@@ -133,16 +139,17 @@ async def verify_google_token(token: str) -> Dict[str, Any]:
             detail=f"Invalid Google token: {str(e)}"
         )
 
-async def exchange_code_for_token(code: str) -> str:
+async def exchange_code_for_token(code: str, redirect_uri: Optional[str] = None) -> str:
     """Exchange authorization code for access token."""
     token_url = "https://oauth2.googleapis.com/token"
+    callback_uri = redirect_uri or settings.google_redirect_uri
     
     data = {
         "client_id": settings.google_client_id,
         "client_secret": settings.google_client_secret,
         "code": code,
         "grant_type": "authorization_code",
-        "redirect_uri": settings.google_redirect_uri,
+        "redirect_uri": callback_uri,
     }
     
     async with httpx.AsyncClient() as client:
@@ -157,11 +164,11 @@ async def exchange_code_for_token(code: str) -> str:
         token_data = response.json()
         return token_data.get("id_token")
 
-async def google_auth_callback(code: str) -> UserResponseWithAuth:
+async def google_auth_callback(code: str, redirect_uri: Optional[str] = None) -> UserResponseWithAuth:
     """Handle Google OAuth callback and login/signup user."""
     try:
         # Exchange code for token
-        id_token_str = await exchange_code_for_token(code)
+        id_token_str = await exchange_code_for_token(code, redirect_uri)
         
         # Verify token and get user info
         user_info = await verify_google_token(id_token_str)

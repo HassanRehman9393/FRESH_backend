@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # Google OAuth Configuration
     google_client_id: str = ""
     google_client_secret: str = ""
-    google_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
+    google_redirect_uri: str = "http://localhost:8080/api/auth/google/callback"
     
     # ML API Configuration
     ml_api_url: str = Field(default="http://localhost:8000", alias="ML_API_URL")
