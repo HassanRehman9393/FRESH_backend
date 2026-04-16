@@ -40,6 +40,11 @@ class ExportDocumentType(str, Enum):
     READINESS_SUMMARY = "readiness_summary"
 
 
+class ExportDocumentFormat(str, Enum):
+    CSV = "csv"
+    PDF = "pdf"
+
+
 # ============================================================================
 # EXPORT STANDARDS
 # ============================================================================
@@ -136,6 +141,7 @@ class ExportDocumentGenerateRequest(BaseModel):
     orchard_id: str
     target_market: str
     document_type: ExportDocumentType = ExportDocumentType.GRADE_REPORT
+    document_format: ExportDocumentFormat = ExportDocumentFormat.CSV
     fruit_type: Optional[str] = None
     include_grades: bool = True
     include_summary: bool = True

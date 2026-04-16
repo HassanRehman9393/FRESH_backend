@@ -546,6 +546,23 @@ class YieldService:
                 "detection_id, is_diseased, orchard_id"
             ).eq("orchard_id", orchard_id_str).in_("detection_id", detection_ids).execute()
             diseases = disease_response.data or []
+
+            # Backward compatibility for legacy rows created before orchard_id propagation.
+            # This remains orchard-safe because detection_ids are already scoped to this orchard.
+            if not diseases:
+                legacy_disease_response = admin_supabase.table("disease_detections").select(
+                    "detection_id, is_diseased, orchard_id"
+                ).in_("detection_id", detection_ids).execute()
+                legacy_diseases = legacy_disease_response.data or []
+                diseases = [
+                    row for row in legacy_diseases
+                    if row.get("orchard_id") in (None, orchard_id_str)
+                ]
+                logger.info(
+                    "🔐 [Yield Service] Legacy disease fallback applied | orchard_id=%s legacy_rows=%s",
+                    orchard_id_str,
+                    len(diseases),
+                )
             
             logger.info(
                 "🔐 [Yield Service] DISEASES RETURNED | orchard_id=%s count=%s | checking orchard isolation...",

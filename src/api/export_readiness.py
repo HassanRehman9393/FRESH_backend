@@ -251,13 +251,15 @@ async def download_export_document(
     document_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Download a generated export document as CSV."""
+    """Download a generated export document (CSV or PDF)."""
     try:
-        file_name, content = await ExportReadinessService.get_document_content(document_id, current_user["user_id"])
-        csv_bytes = content.encode("utf-8")
+        file_name, content_bytes, media_type = await ExportReadinessService.get_document_content(
+            document_id,
+            current_user["user_id"]
+        )
         return StreamingResponse(
-            io.BytesIO(csv_bytes),
-            media_type="text/csv",
+            io.BytesIO(content_bytes),
+            media_type=media_type,
             headers={"Content-Disposition": f'attachment; filename="{file_name}"'}
         )
     except HTTPException:
