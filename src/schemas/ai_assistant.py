@@ -32,12 +32,18 @@ class ChatRequest(BaseModel):
     """Schema for chat request from client."""
     message: str = Field(..., min_length=1, max_length=4000, description="User's message")
     conversation_id: Optional[UUID] = Field(None, description="Existing conversation ID to continue")
+    custom_instructions: Optional[str] = Field(
+        None,
+        max_length=2000,
+        description="Optional user custom instructions merged with the locked system prompt"
+    )
     
     class Config:
         json_schema_extra = {
             "example": {
                 "message": "What diseases affect mangoes and how can I prevent them?",
-                "conversation_id": None
+                "conversation_id": None,
+                "custom_instructions": "Keep answers short and farmer-friendly."
             }
         }
 
@@ -76,6 +82,18 @@ class ChatResponse(BaseModel):
                 "tools_used": ["get_diseases_by_fruit", "get_disease_info"]
             }
         }
+
+
+class AssistantUsageResponse(BaseModel):
+    """Schema for assistant usage summary."""
+    role: str = Field(..., description="Normalized user role")
+    daily_message_limit: int = Field(..., description="Daily message cap")
+    used_messages: int = Field(..., description="Messages used today")
+    remaining_messages: int = Field(..., description="Messages remaining today")
+    allowed: bool = Field(..., description="Whether the user can send another message")
+    window_start: datetime = Field(..., description="UTC window start")
+    window_end: datetime = Field(..., description="UTC window end")
+    reset_at: datetime = Field(..., description="When the limit resets")
 
 
 class ConversationSummary(BaseModel):

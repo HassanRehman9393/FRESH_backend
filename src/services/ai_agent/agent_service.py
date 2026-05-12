@@ -48,7 +48,8 @@ class AIAgentService:
         self,
         user_id: str,
         message: str,
-        conversation_id: str = None
+        conversation_id: str = None,
+        custom_instructions: str = None
     ) -> Dict[str, Any]:
         """
         Main entry point - processes user message through the agent pipeline.
@@ -165,7 +166,8 @@ class AIAgentService:
             if not tools_used:
                 response = await self.groq.generate_with_tools(
                     messages=history,
-                    tools=AgentTools.TOOL_DEFINITIONS
+                    tools=AgentTools.TOOL_DEFINITIONS,
+                    custom_instructions=custom_instructions
                 )
             else:
                 response = {"response": "", "tool_calls": []}
@@ -191,7 +193,8 @@ class AIAgentService:
                     final_response = await self.groq.generate_with_tool_results(
                         original_prompt=message,
                         tool_results=tool_results,
-                        conversation_history=history[:-1]  # Exclude last user message
+                        conversation_history=history[:-1],  # Exclude last user message
+                        custom_instructions=custom_instructions
                     )
                     response["response"] = final_response
                     response["tool_calls"] = []  # Clear tool calls after processing
@@ -201,7 +204,8 @@ class AIAgentService:
                 final_response = await self.groq.generate_with_tool_results(
                     original_prompt=message,
                     tool_results=tool_results,
-                    conversation_history=history[:-1]  # Exclude last user message
+                    conversation_history=history[:-1],  # Exclude last user message
+                    custom_instructions=custom_instructions
                 )
                 response["response"] = final_response
             

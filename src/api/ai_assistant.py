@@ -7,11 +7,13 @@ FastAPI router for AI Assistant chat and conversation management.
 from fastapi import APIRouter, HTTPException, Depends, status
 from typing import List, Optional
 from uuid import UUID
+from datetime import datetime
 import logging
 
 from src.schemas.ai_assistant import (
     ChatRequest,
     ChatResponse,
+    AssistantUsageResponse,
     ConversationSummary,
     ConversationDetail,
     ConversationsListResponse,
@@ -26,6 +28,7 @@ from src.schemas.ai_assistant import (
     DeleteConversationResponse
 )
 from src.services.ai_agent import AIAgentService
+from src.services.ai_agent.usage_service import AssistantUsageService
 from src.api.deps import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -55,12 +58,30 @@ async def chat_with_assistant(
     - "What diseases commonly affect apples in Pakistan?"
     """
     try:
+        usage_service = AssistantUsageService()
+        usage = await usage_service.is_allowed(
+            user_id=current_user["user_id"],
+            role=current_user.get("role")
+        )
+
+        if not usage["allowed"]:
+            retry_after = usage_service.retry_after_seconds()
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"You have reached today's AI Assistant limit of {usage['daily_message_limit']} messages. "
+                    f"Please try again after the limit resets."
+                ),
+                headers={"Retry-After": str(retry_after)}
+            )
+
         service = AIAgentService(user_id=current_user["user_id"])
         
         result = await service.process_message(
             user_id=current_user["user_id"],
             message=request.message,
-            conversation_id=str(request.conversation_id) if request.conversation_id else None
+            conversation_id=str(request.conversation_id) if request.conversation_id else None,
+            custom_instructions=request.custom_instructions
         )
         
         return ChatResponse(
@@ -71,11 +92,48 @@ async def chat_with_assistant(
             tools_used=result.get("tools_used")
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Chat error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process message: {str(e)}"
+        )
+
+
+@router.get(
+    "/usage",
+    response_model=AssistantUsageResponse,
+    summary="Get current AI Assistant usage"
+)
+async def get_usage(
+    current_user: dict = Depends(get_current_user)
+):
+    """Return the current daily message usage for the signed-in user."""
+    try:
+        usage_service = AssistantUsageService()
+        usage = await usage_service.get_usage_summary(
+            user_id=current_user["user_id"],
+            role=current_user.get("role")
+        )
+
+        return AssistantUsageResponse(
+            role=usage["role"],
+            daily_message_limit=usage["daily_message_limit"],
+            used_messages=usage["used_messages"],
+            remaining_messages=usage["remaining_messages"],
+            allowed=usage["allowed"],
+            window_start=datetime.fromisoformat(usage["window_start"]),
+            window_end=datetime.fromisoformat(usage["window_end"]),
+            reset_at=datetime.fromisoformat(usage["reset_at"]),
+        )
+
+    except Exception as e:
+        logger.error(f"Usage lookup error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load AI Assistant usage"
         )
 
 
