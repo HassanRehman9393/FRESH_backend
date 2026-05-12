@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
     qdrant_api_key: str = Field(default="", alias="QDRANT_API_KEY")
-    ai_assistant_daily_message_limit: int = Field(default=2, alias="AI_ASSISTANT_DAILY_MESSAGE_LIMIT")
+    ai_assistant_daily_message_limit: int = Field(default=5, alias="AI_ASSISTANT_DAILY_MESSAGE_LIMIT")
     ai_assistant_exporter_daily_message_limit: int = Field(default=35, alias="AI_ASSISTANT_EXPORTER_DAILY_MESSAGE_LIMIT")
     ai_assistant_government_daily_message_limit: int = Field(default=40, alias="AI_ASSISTANT_GOVERNMENT_DAILY_MESSAGE_LIMIT")
     ai_assistant_admin_daily_message_limit: int = Field(default=9999, alias="AI_ASSISTANT_ADMIN_DAILY_MESSAGE_LIMIT")
