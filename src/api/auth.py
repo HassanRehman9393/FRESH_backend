@@ -23,16 +23,23 @@ def _resolve_frontend_origin(request: Request, state: Optional[str]) -> str:
     allowed_origins = set(settings.allowed_origins)
 
     for candidate in candidates:
-        if candidate and candidate in allowed_origins:
+        if not candidate:
+            continue
+
+        if candidate in allowed_origins:
+            return candidate
+
+        # Mobile OAuth may return to an Expo deep link or custom app scheme.
+        if candidate.startswith(("exp://", "freshmobile://")):
             return candidate
 
     return "http://localhost:3000"
 
 @router.get("/google/login", response_model=GoogleAuthURL)
-def google_login(request: Request):
+def google_login(request: Request, state: Optional[str] = Query(None, description="Mobile/web return URL")):
     """Get Google OAuth authorization URL."""
     redirect_uri = f"{request.base_url}api/auth/google/callback"
-    frontend_origin = _resolve_frontend_origin(request, None)
+    frontend_origin = _resolve_frontend_origin(request, state)
     auth_url = get_google_auth_url(redirect_uri, frontend_origin)
     return GoogleAuthURL(auth_url=auth_url)
 
@@ -63,6 +70,9 @@ async def google_callback_get(
         "access_token": user.access_token,
         "token_type": user.token_type,
     })
+
+    if frontend_origin.startswith(("exp://", "freshmobile://")):
+        return RedirectResponse(url=f"{frontend_origin}?{query}", status_code=302)
 
     return RedirectResponse(url=f"{frontend_origin}/auth/google/callback?{query}", status_code=302)
 
