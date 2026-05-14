@@ -26,6 +26,15 @@ class UserResponse(BaseModel):
     full_name: Optional[str]
     role: UserRole
 
+class UserUpdate(BaseModel):
+    """Schema for updating user information"""
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+    role: Optional[UserRole] = None
+    
+    class Config:
+        from_attributes = True
+
 class GoogleUserData(BaseModel):
     email: EmailStr
     full_name: str

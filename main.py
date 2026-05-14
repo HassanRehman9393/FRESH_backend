@@ -202,7 +202,8 @@ from src.api import (
     yield_router,
     analytics_router,
     ai_assistant_router,
-    export_readiness_router
+    export_readiness_router,
+    admin_router
 )
 from src.api.mosaic import router as mosaic_router
 app.include_router(auth_router, prefix="/api")
@@ -218,6 +219,7 @@ app.include_router(ai_assistant_router, prefix="/api")
 app.include_router(yield_router, prefix="/api")
 app.include_router(mosaic_router, prefix="/api")
 app.include_router(export_readiness_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
 
 if __name__ == "__main__":
     uvicorn.run(

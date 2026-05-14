@@ -72,3 +72,15 @@ async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] 
         }
     except:
         return None
+
+async def get_current_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    """
+    Dependency to verify current user is an admin.
+    Raises 403 Forbidden if user is not an admin.
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin users can access this endpoint"
+        )
+    return current_user
