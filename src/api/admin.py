@@ -11,6 +11,7 @@ from datetime import datetime
 
 from src.schemas.user import UserResponse, UserUpdate, UserSignup, UserRole
 from src.schemas.detection import DetectionResponse
+from src.schemas.disease import DiseaseDetectionResponse
 from src.schemas.weather import OrchardResponse, OrchardCreate, OrchardUpdate
 from src.api.deps import get_current_admin
 from src.core.supabase_client import supabase, admin_supabase
@@ -458,7 +459,18 @@ async def get_all_detection_results(
         query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
         
         response = query.execute()
-        
+
+        # Fetch classification data for all detection IDs in one query
+        detection_ids = [item.get("detection_id") for item in response.data if item.get("detection_id")]
+        classification_map = {}
+        if detection_ids:
+            try:
+                cls_response = supabase.table("classification_results").select("*").in_("detection_id", detection_ids).execute()
+                for cls in cls_response.data:
+                    classification_map[cls["detection_id"]] = cls
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to fetch classification results: {e}")
+
         # Transform data to match DetectionResponse schema
         results = []
         for item in response.data:
@@ -469,7 +481,7 @@ async def get_all_detection_results(
                     bbox = json.loads(bbox)
                 except:
                     bbox = {}
-            
+
             # Convert from ML format (x1, x2, y1, y2) to expected format (x, y, width, height)
             if bbox and "x1" in bbox and "y1" in bbox:
                 x1 = float(bbox.get("x1", 0))
@@ -482,15 +494,25 @@ async def get_all_detection_results(
                     "width": x2 - x1,
                     "height": y2 - y1
                 }
-            
-            # Parse classification if it's a JSON string
-            classification = item.get("classification")
-            if isinstance(classification, str):
-                try:
-                    classification = json.loads(classification)
-                except:
-                    classification = None
-            
+
+            # Build classification from classification_results table
+            cls_data = classification_map.get(item.get("detection_id"))
+            if cls_data:
+                classification = {
+                    "ripeness_level": cls_data.get("ripeness_level"),
+                    "ripeness_confidence": cls_data.get("confidence_score"),
+                    "color": cls_data.get("estimated_color"),
+                    "size": cls_data.get("estimated_size"),
+                }
+            else:
+                # Fall back to inline classification column if present
+                classification = item.get("classification")
+                if isinstance(classification, str):
+                    try:
+                        classification = json.loads(classification)
+                    except:
+                        classification = None
+
             results.append({
                 "detection_id": item.get("detection_id"),
                 "user_id": item.get("user_id"),
@@ -507,10 +529,68 @@ async def get_all_detection_results(
         
         logger.info(f"✅ Fetched {len(results)} detection results")
         return results
-        
+
     except Exception as e:
         logger.error(f"❌ Error fetching detection results: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch detection results: {str(e)}"
+        )
+
+
+# ==================== DISEASE RESULTS MANAGEMENT ====================
+
+@router.get("/disease-results", response_model=List[DiseaseDetectionResponse])
+async def get_all_disease_results(
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    user_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_admin)
+):
+    """
+    Get all disease detection results across all users with pagination.
+    Admin only endpoint.
+    """
+    try:
+        logger.info(f"🔍 Admin fetching disease results | limit={limit} offset={offset} user_id={user_id}")
+
+        query = supabase.table("disease_detections").select("*")
+
+        if user_id:
+            query = query.eq("user_id", user_id)
+
+        query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
+        response = query.execute()
+
+        results = []
+        for item in response.data:
+            probabilities = item.get("probabilities")
+            if isinstance(probabilities, str):
+                try:
+                    probabilities = json.loads(probabilities)
+                except Exception:
+                    probabilities = None
+
+            results.append({
+                "disease_detection_id": item.get("disease_detection_id"),
+                "detection_id": item.get("detection_id"),
+                "user_id": item.get("user_id"),
+                "image_id": item.get("image_id"),
+                "orchard_id": item.get("orchard_id"),
+                "disease_type": item.get("disease_type", "unknown"),
+                "is_diseased": item.get("is_diseased", False),
+                "disease_confidence": item.get("disease_confidence", 0.0),
+                "severity_level": item.get("severity_level"),
+                "probabilities": probabilities,
+                "created_at": item.get("created_at"),
+            })
+
+        logger.info(f"✅ Fetched {len(results)} disease results")
+        return results
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching disease results: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch disease results: {str(e)}"
         )
